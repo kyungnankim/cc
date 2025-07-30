@@ -77,7 +77,7 @@ const MyPage = () => {
     { id: "battles", label: "내 배틀", icon: Trophy },
     { id: "votes", label: "투표 내역", icon: Heart },
     { id: "points", label: "포인트", icon: Award },
-    { id: "settings", label: "설정", icon: Settings },
+    ,
   ];
 
   const handleLogout = async () => {

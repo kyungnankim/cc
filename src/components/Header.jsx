@@ -10,10 +10,10 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
     entertainment: false,
   });
 
-  // 🔧 타이머 관리를 위한 ref
+  // 타이머 관리를 위한 ref
   const dropdownTimers = useRef({});
 
-  // 🔧 드롭다운 열기 (즉시)
+  // 드롭다운 열기 (즉시)
   const openDropdown = (key) => {
     // 기존 타이머가 있으면 취소
     if (dropdownTimers.current[key]) {
@@ -27,9 +27,9 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
     }));
   };
 
-  // 🔧 드롭다운 닫기 (지연)
+  // 드롭다운 닫기 (지연)
   const closeDropdown = (key) => {
-    // 500ms 후에 닫기
+    // 300ms 후에 닫기
     dropdownTimers.current[key] = setTimeout(() => {
       setDropdownOpen((prev) => ({
         ...prev,
@@ -39,7 +39,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
     }, 300);
   };
 
-  // 🔧 컴포넌트 언마운트 시 타이머 정리
+  // 컴포넌트 언마운트 시 타이머 정리
   useEffect(() => {
     return () => {
       Object.values(dropdownTimers.current).forEach((timer) => {
@@ -114,7 +114,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
                   {item.hasDropdown && <ChevronDown className="w-4 h-4" />}
                 </button>
 
-                {/* 🔧 드롭다운 메뉴 개선 */}
+                {/* 드롭다운 메뉴 */}
                 {item.hasDropdown && dropdownOpen[item.dropdownKey] && (
                   <div
                     onMouseEnter={() => openDropdown(item.dropdownKey)}
@@ -144,9 +144,9 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
           </nav>
 
           <div className="flex items-center gap-4">
-            {/* --- ⭐️ [수정] 로그인 상태에 따라 UI를 다르게 표시 --- */}
+            {/* 로그인 상태에 따라 UI를 다르게 표시 */}
             {user ? (
-              // --- 로그인 했을 때 보여줄 UI ---
+              // 로그인 했을 때 보여줄 UI
               <>
                 <Link to="/create-battle">
                   <button className="hidden md:flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
@@ -162,7 +162,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
                   콘텐츠 업로드
                 </button>
 
-                {/* 🔧 사용자 프로필 드롭다운도 개선 */}
+                {/* 사용자 프로필 드롭다운 */}
                 <div
                   className="relative group"
                   onMouseEnter={() => openDropdown("user")}
@@ -210,7 +210,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
                 </div>
               </>
             ) : (
-              // --- 로그아웃 상태일 때 보여줄 UI ---
+              // 로그아웃 상태일 때 보여줄 UI
               <button
                 onClick={() => onNavigate("/login")}
                 className="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition-colors font-semibold"
@@ -234,9 +234,9 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
         </div>
       </div>
 
-      {/* Mobile Menu */}
+      {/* Mobile Menu - 스크롤 문제 해결 */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-gray-900 border-t border-gray-800">
+        <div className="md:hidden bg-gray-900 border-t border-gray-800 max-h-[calc(100vh-4rem)] overflow-y-auto">
           <div className="px-4 py-4 space-y-2">
             {menuItems.map((item) => (
               <div key={item.label}>
@@ -250,7 +250,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
                   {item.label}
                 </button>
 
-                {/* 🔧 모바일에서 서브메뉴 표시 */}
+                {/* 모바일에서 서브메뉴 표시 */}
                 {item.hasDropdown && (
                   <div className="ml-4 mt-2 space-y-1">
                     {item.subItems.map((subItem) => (
@@ -271,7 +271,7 @@ const Header = ({ user, onLogout, onCreateBattle, onNavigate }) => {
             ))}
 
             {user && (
-              <div className="border-t border-gray-700 pt-4 mt-4 space-y-4">
+              <div className="border-t border-gray-700 pt-4 mt-4 space-y-4 pb-4">
                 <Link to="/create-battle">
                   <button
                     onClick={() => setMobileMenuOpen(false)}
