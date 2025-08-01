@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
-import { createBattleFromContenders } from "../services/battleService";
+import { createBattleFromContenders } from "../services/matchingService";
 import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 

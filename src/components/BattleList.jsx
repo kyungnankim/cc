@@ -21,7 +21,7 @@ import {
   findAndCreateRandomBattle,
   getMatchingStatistics,
   executeForceMatching,
-} from "../services/battleService";
+} from "../services/matchingService";
 import toast from "react-hot-toast";
 
 const BattleList = () => {

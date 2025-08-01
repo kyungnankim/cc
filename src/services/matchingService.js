@@ -1,530 +1,886 @@
-// 순수 자동매칭 시스템 - Firebase 의존성 최소화
-// src/services/matchingService.js
+// src/services/matchingService.js - 매칭 시스템 서비스
 
+import { auth, db } from "../firebase/config";
 import {
   collection,
+  doc,
+  getDocs,
   query,
   where,
-  getDocs,
-  orderBy,
   limit,
-  writeBatch,
-  doc,
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
-import { db } from "../firebase/config";
+
+// ==================== 유틸리티 함수들 ====================
+
+// 매칭 점수 계산 함수 (플랫폼 고려)
+export const calculateMatchingScore = (contender1, contender2) => {
+  let score = 0;
+
+  // 같은 카테고리 보너스
+  if (contender1.category === contender2.category) {
+    score += 50;
+  }
+
+  // 같은 플랫폼 보너스
+  if (contender1.platform === contender2.platform) {
+    score += 30;
+  }
+
+  // 인기도 차이 고려
+  const popularityDiff = Math.abs(
+    (contender1.likeCount || 0) - (contender2.likeCount || 0)
+  );
+  score += Math.max(0, 30 - popularityDiff / 10);
+
+  // 최근 생성된 콘텐츠 보너스
+  const now = Date.now();
+  const age1 = now - (contender1.createdAt?.toDate?.()?.getTime() || now);
+  const age2 = now - (contender2.createdAt?.toDate?.()?.getTime() || now);
+  const avgAge = (age1 + age2) / 2;
+  const dayInMs = 24 * 60 * 60 * 1000;
+
+  if (avgAge < 7 * dayInMs) {
+    score += 20;
+  }
+
+  // 미디어 콘텐츠 보너스
+  if (contender1.platform !== "image" && contender2.platform !== "image") {
+    score += 15;
+  }
+
+  // 랜덤 요소 추가
+  score += Math.random() * 10;
+
+  return Math.round(score);
+};
+
+// ==================== 배틀 생성 함수들 ====================
 
 /**
- * 순수 매칭 알고리즘 클래스
- * Firebase와 독립적으로 동작하는 매칭 로직
+ * 기본 배틀 생성 (미디어 정보 포함)
  */
-class PureMatchingEngine {
-  constructor() {
-    this.matchingRules = {
-      // 매칭 우선순위 설정
-      categoryWeight: 1.0, // 같은 카테고리 매칭 가중치
-      creatorDiversityWeight: 0.8, // 크리에이터 다양성 가중치
-      freshnessWeight: 0.6, // 최신성 가중치
-      popularityWeight: 0.4, // 인기도 가중치
-      balanceWeight: 0.7, // 밸런스 가중치
+export const createBattleFromContenders = async (contenderA, contenderB) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("로그인이 필요합니다.");
+
+  if (contenderA.category !== contenderB.category) {
+    throw new Error("같은 카테고리의 콘텐츠끼리만 배틀할 수 있습니다.");
+  }
+
+  if (contenderA.creatorId === contenderB.creatorId) {
+    throw new Error("같은 크리에이터의 콘텐츠끼리는 배틀할 수 없습니다.");
+  }
+
+  return await runTransaction(db, async (transaction) => {
+    const contenderRefA = doc(db, "contenders", contenderA.id);
+    const contenderRefB = doc(db, "contenders", contenderB.id);
+
+    const contenderDocA = await transaction.get(contenderRefA);
+    const contenderDocB = await transaction.get(contenderRefB);
+
+    if (
+      !contenderDocA.exists() ||
+      contenderDocA.data().status !== "available" ||
+      !contenderDocB.exists() ||
+      contenderDocB.data().status !== "available"
+    ) {
+      throw new Error("선택된 콘텐츠 중 하나가 이미 사용 중입니다.");
+    }
+
+    const startTime = new Date();
+    const endTime = new Date(startTime.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    const battleData = {
+      creatorId: currentUser.uid,
+      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      title: `${contenderA.title} vs ${contenderB.title}`,
+      category: contenderA.category,
+
+      itemA: createBattleItem(contenderA),
+      itemB: createBattleItem(contenderB),
+
+      status: "ongoing",
+      createdAt: serverTimestamp(),
+      endsAt: endTime,
+      totalVotes: 0,
+      participants: [],
+
+      // 매칭 관련 메타데이터
+      matchingMethod: "smart_algorithm",
+      matchingScore: calculateMatchingScore(contenderA, contenderB),
+
+      // 소셜 및 상호작용
+      likeCount: 0,
+      likedBy: [],
+      shareCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      uniqueViewers: [],
+
+      // 메트릭
+      metrics: {
+        engagementRate: 0,
+        commentRate: 0,
+        shareRate: 0,
+      },
+
+      updatedAt: serverTimestamp(),
+      lastVoteAt: null,
+      lastCommentAt: null,
+      lastViewAt: null,
     };
 
-    this.antiPatterns = [
-      "same_creator", // 같은 크리에이터 매칭 방지
-      "recent_battle", // 최근 배틀한 컨텐츠 매칭 방지
-      "category_mismatch", // 카테고리 불일치 방지
-      "skill_gap_too_large", // 실력차 너무 큰 매칭 방지
-    ];
-  }
+    const battleRef = doc(collection(db, "battles"));
 
-  /**
-   * 컨텐츠 매칭 점수 계산
-   * @param {Object} contenderA - 첫 번째 컨텐츠
-   * @param {Object} contenderB - 두 번째 컨텐츠
-   * @param {Array} recentBattles - 최근 배틀 기록
-   * @returns {number} - 매칭 점수 (0-100)
-   */
-  calculateMatchScore(contenderA, contenderB, recentBattles = []) {
-    let score = 0;
-    const weights = this.matchingRules;
+    transaction.set(battleRef, battleData);
+    transaction.update(contenderRefA, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocA.data().battleCount || 0) + 1,
+    });
+    transaction.update(contenderRefB, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocB.data().battleCount || 0) + 1,
+    });
 
-    // 1. 카테고리 매칭 점수 (필수 조건)
-    if (contenderA.category !== contenderB.category) {
-      return 0; // 카테고리가 다르면 매칭 불가
-    }
-    score += 25 * weights.categoryWeight;
+    return battleRef.id;
+  });
+};
 
-    // 2. 크리에이터 다양성 점수
-    if (contenderA.creatorId !== contenderB.creatorId) {
-      score += 20 * weights.creatorDiversityWeight;
-    } else {
-      return 0; // 같은 크리에이터는 매칭 불가
-    }
+/**
+ * 유연한 배틀 생성 (카테고리 및 크리에이터 제한 완화)
+ */
+export const createBattleFromContendersFlexible = async (
+  contenderA,
+  contenderB
+) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("로그인이 필요합니다.");
 
-    // 3. 최신성 점수 (둘 다 최근에 만들어진 컨텐츠일 때 높은 점수)
-    const daysSinceA = this.getDaysSinceCreation(contenderA.createdAt);
-    const daysSinceB = this.getDaysSinceCreation(contenderB.createdAt);
-    const avgFreshness = (daysSinceA + daysSinceB) / 2;
-    const freshnessScore =
-      Math.max(0, 20 - avgFreshness) * weights.freshnessWeight;
-    score += freshnessScore;
+  return await runTransaction(db, async (transaction) => {
+    const contenderRefA = doc(db, "contenders", contenderA.id);
+    const contenderRefB = doc(db, "contenders", contenderB.id);
 
-    // 4. 인기도 밸런스 점수 (비슷한 인기도끼리 매칭)
-    const popularityA = contenderA.likeCount || 0;
-    const popularityB = contenderB.likeCount || 0;
-    const popularityDiff = Math.abs(popularityA - popularityB);
-    const popularityScore =
-      Math.max(0, 15 - popularityDiff) * weights.popularityWeight;
-    score += popularityScore;
+    const contenderDocA = await transaction.get(contenderRefA);
+    const contenderDocB = await transaction.get(contenderRefB);
 
-    // 5. 밸런스 점수 (공정한 매칭을 위한 추가 요소들)
-    const balanceScore = this.calculateBalanceScore(contenderA, contenderB);
-    score += balanceScore * weights.balanceWeight;
-
-    // 6. 안티패턴 패널티 적용
-    const penalty = this.calculateAntiPatternPenalty(
-      contenderA,
-      contenderB,
-      recentBattles
-    );
-    score -= penalty;
-
-    return Math.max(0, Math.min(100, score));
-  }
-
-  /**
-   * 생성일로부터 지난 일수 계산
-   */
-  getDaysSinceCreation(createdAt) {
-    const now = new Date();
-    const created = createdAt.toDate ? createdAt.toDate() : new Date(createdAt);
-    return Math.floor((now - created) / (1000 * 60 * 60 * 24));
-  }
-
-  /**
-   * 밸런스 점수 계산
-   */
-  calculateBalanceScore(contenderA, contenderB) {
-    let balanceScore = 10;
-
-    // 제목 길이 유사성 (비슷한 길이의 제목끼리 매칭)
-    const titleLengthDiff = Math.abs(
-      contenderA.title.length - contenderB.title.length
-    );
-    if (titleLengthDiff < 10) balanceScore += 5;
-
-    // 업로드 시간 다양성 (다른 시간대에 업로드된 컨텐츠 선호)
-    const timeA = new Date(contenderA.createdAt).getHours();
-    const timeB = new Date(contenderB.createdAt).getHours();
-    const timeDiff = Math.abs(timeA - timeB);
-    if (timeDiff > 4) balanceScore += 3;
-
-    return balanceScore;
-  }
-
-  /**
-   * 안티패턴 패널티 계산
-   */
-  calculateAntiPatternPenalty(contenderA, contenderB, recentBattles) {
-    let penalty = 0;
-
-    // 최근에 이미 배틀한 적이 있는 조합인지 확인
-    const hasRecentBattle = recentBattles.some(
-      (battle) =>
-        (battle.itemA.contenderId === contenderA.id &&
-          battle.itemB.contenderId === contenderB.id) ||
-        (battle.itemA.contenderId === contenderB.id &&
-          battle.itemB.contenderId === contenderA.id)
-    );
-
-    if (hasRecentBattle) penalty += 50; // 큰 패널티
-
-    // 같은 크리에이터의 연속 매칭 방지는 이미 위에서 처리됨
-
-    return penalty;
-  }
-
-  /**
-   * 여러 매칭 후보 중 최적의 매칭들을 선별
-   * @param {Array} contenders - 매칭 가능한 컨텐츠들
-   * @param {Array} recentBattles - 최근 배틀 기록
-   * @param {number} maxMatches - 최대 생성할 매칭 수
-   * @returns {Array} - 매칭 쌍들의 배열
-   */
-  findOptimalMatches(contenders, recentBattles = [], maxMatches = 3) {
-    const matches = [];
-    const usedContenders = new Set();
-
-    // 모든 가능한 매칭 조합 생성 및 점수 계산
-    const candidateMatches = [];
-
-    for (let i = 0; i < contenders.length; i++) {
-      for (let j = i + 1; j < contenders.length; j++) {
-        const contenderA = contenders[i];
-        const contenderB = contenders[j];
-
-        const score = this.calculateMatchScore(
-          contenderA,
-          contenderB,
-          recentBattles
-        );
-
-        if (score > 50) {
-          // 최소 점수 기준
-          candidateMatches.push({
-            contenderA,
-            contenderB,
-            score,
-            id: `${contenderA.id}-${contenderB.id}`,
-          });
-        }
-      }
+    if (
+      !contenderDocA.exists() ||
+      contenderDocA.data().status !== "available" ||
+      !contenderDocB.exists() ||
+      contenderDocB.data().status !== "available"
+    ) {
+      throw new Error("선택된 콘텐츠 중 하나가 이미 사용 중입니다.");
     }
 
-    // 점수순으로 정렬
-    candidateMatches.sort((a, b) => b.score - a.score);
+    const startTime = new Date();
+    const endTime = new Date(startTime.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    // 최적의 매칭들 선별 (중복 사용 방지)
-    for (const candidate of candidateMatches) {
-      if (matches.length >= maxMatches) break;
+    // 카테고리 결정 (우선순위: A의 카테고리 -> B의 카테고리 -> "mixed")
+    const battleCategory =
+      contenderA.category || contenderB.category || "mixed";
 
-      if (
-        !usedContenders.has(candidate.contenderA.id) &&
-        !usedContenders.has(candidate.contenderB.id)
-      ) {
-        matches.push(candidate);
-        usedContenders.add(candidate.contenderA.id);
-        usedContenders.add(candidate.contenderB.id);
-      }
+    const battleData = {
+      creatorId: currentUser.uid,
+      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      title: `${contenderA.title} vs ${contenderB.title}`,
+      category: battleCategory,
+
+      itemA: createBattleItemFlexible(contenderA),
+      itemB: createBattleItemFlexible(contenderB),
+
+      status: "ongoing",
+      createdAt: serverTimestamp(),
+      endsAt: endTime,
+      totalVotes: 0,
+      participants: [],
+
+      // 매칭 관련 메타데이터
+      matchingMethod: "flexible_algorithm",
+      matchingScore: calculateMatchingScore(contenderA, contenderB),
+      isSameCreator: contenderA.creatorId === contenderB.creatorId,
+      isCrossCategory: contenderA.category !== contenderB.category,
+
+      // 소셜 및 상호작용
+      likeCount: 0,
+      likedBy: [],
+      shareCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      uniqueViewers: [],
+
+      // 메트릭
+      metrics: {
+        engagementRate: 0,
+        commentRate: 0,
+        shareRate: 0,
+      },
+
+      updatedAt: serverTimestamp(),
+      lastVoteAt: null,
+      lastCommentAt: null,
+      lastViewAt: null,
+    };
+
+    const battleRef = doc(collection(db, "battles"));
+
+    transaction.set(battleRef, battleData);
+    transaction.update(contenderRefA, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocA.data().battleCount || 0) + 1,
+    });
+    transaction.update(contenderRefB, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocB.data().battleCount || 0) + 1,
+    });
+
+    return battleRef.id;
+  });
+};
+
+/**
+ * 강제 배틀 생성 (모든 제한 해제)
+ */
+export const createBattleFromContendersForce = async (
+  contenderA,
+  contenderB
+) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("로그인이 필요합니다.");
+
+  return await runTransaction(db, async (transaction) => {
+    const contenderRefA = doc(db, "contenders", contenderA.id);
+    const contenderRefB = doc(db, "contenders", contenderB.id);
+
+    const contenderDocA = await transaction.get(contenderRefA);
+    const contenderDocB = await transaction.get(contenderRefB);
+
+    if (
+      !contenderDocA.exists() ||
+      contenderDocA.data().status !== "available" ||
+      !contenderDocB.exists() ||
+      contenderDocB.data().status !== "available"
+    ) {
+      throw new Error("선택된 콘텐츠 중 하나가 이미 사용 중입니다.");
     }
 
-    return matches;
-  }
+    const startTime = new Date();
+    const endTime = new Date(startTime.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  /**
-   * 매칭 다양성을 위한 카테고리 분산
-   */
-  diversifyByCategory(matches) {
-    const categoryCount = {};
-    const diversifiedMatches = [];
+    const battleData = {
+      creatorId: currentUser.uid,
+      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      title: `${contenderA.title} vs ${contenderB.title}`,
+      category: contenderA.category || contenderB.category || "general",
 
-    // 카테고리별 매칭 수 제한
-    for (const match of matches) {
-      const category = match.contenderA.category;
-      categoryCount[category] = (categoryCount[category] || 0) + 1;
+      itemA: createBattleItemFlexible(contenderA),
+      itemB: createBattleItemFlexible(contenderB),
 
-      // 같은 카테고리 최대 2개까지만 허용
-      if (categoryCount[category] <= 2) {
-        diversifiedMatches.push(match);
-      }
-    }
+      status: "ongoing",
+      createdAt: serverTimestamp(),
+      endsAt: endTime,
+      totalVotes: 0,
+      participants: [],
 
-    return diversifiedMatches;
-  }
+      // 매칭 관련 메타데이터
+      matchingMethod: "force_matching",
+      matchingScore: 0,
+
+      // 소셜 및 상호작용
+      likeCount: 0,
+      likedBy: [],
+      shareCount: 0,
+      commentCount: 0,
+      viewCount: 0,
+      uniqueViewers: [],
+
+      // 메트릭
+      metrics: {
+        engagementRate: 0,
+        commentRate: 0,
+        shareRate: 0,
+      },
+
+      updatedAt: serverTimestamp(),
+      lastVoteAt: null,
+      lastCommentAt: null,
+      lastViewAt: null,
+    };
+
+    const battleRef = doc(collection(db, "battles"));
+
+    transaction.set(battleRef, battleData);
+    transaction.update(contenderRefA, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocA.data().battleCount || 0) + 1,
+    });
+    transaction.update(contenderRefB, {
+      status: "in_battle",
+      lastBattleId: battleRef.id,
+      battleCount: (contenderDocB.data().battleCount || 0) + 1,
+    });
+
+    return battleRef.id;
+  });
+};
+
+// ==================== 헬퍼 함수들 ====================
+
+/**
+ * 배틀 아이템 생성 (표준)
+ */
+function createBattleItem(contender) {
+  return {
+    title: contender.title,
+    imageUrl: contender.imageUrl,
+    votes: 0,
+    contenderId: contender.id,
+    creatorId: contender.creatorId,
+    creatorName: contender.creatorName,
+    description: contender.description || "",
+
+    // 플랫폼 및 미디어 정보
+    platform: contender.platform || "image",
+    contentType: contender.contentType || "image",
+
+    // 추출된 미디어 데이터
+    ...(contender.extractedData && {
+      extractedData: contender.extractedData,
+    }),
+
+    // 호환성을 위한 기존 필드들
+    ...(contender.platform === "youtube" && {
+      youtubeUrl: contender.youtubeUrl,
+      youtubeId: contender.youtubeId,
+      thumbnailUrl: contender.thumbnailUrl,
+    }),
+
+    ...(contender.platform === "instagram" && {
+      instagramUrl: contender.instagramUrl,
+      postType: contender.postType,
+    }),
+
+    ...(contender.platform === "tiktok" && {
+      tiktokUrl: contender.tiktokUrl,
+      tiktokId: contender.tiktokId,
+    }),
+
+    // 시간 설정
+    ...(contender.timeSettings && {
+      timeSettings: contender.timeSettings,
+    }),
+  };
 }
 
 /**
- * Firebase와 연동되는 매칭 서비스 클래스
+ * 배틀 아이템 생성 (유연한 버전)
  */
-class AdvancedMatchingService {
-  constructor() {
-    this.matchingEngine = new PureMatchingEngine();
-    this.lastMatchingTime = null;
-    this.matchingCooldown = 5 * 60 * 1000; // 5분 쿨다운
-  }
+function createBattleItemFlexible(contender) {
+  return {
+    title: contender.title,
+    imageUrl: contender.imageUrl,
+    votes: 0,
+    contenderId: contender.id,
+    creatorId: contender.creatorId,
+    creatorName: contender.creatorName,
+    platform: contender.platform || "image",
+    contentType: contender.contentType || "image",
+    extractedData: contender.extractedData || null,
+    timeSettings: contender.timeSettings || null,
+    description: contender.description || "",
+    originalCategory: contender.category,
+  };
+}
 
-  /**
-   * 스마트 자동 매칭 실행
-   * @param {Object} options - 매칭 옵션
-   * @returns {Promise<Object>} - 매칭 결과
-   */
-  async executeSmartMatching(options = {}) {
-    const {
-      maxContenders = 50,
-      maxMatches = 3,
-      forceCooldown = false,
-    } = options;
+// ==================== 스마트 매칭 시스템 ====================
 
-    // 쿨다운 체크
-    if (!forceCooldown && this.isInCooldown()) {
-      return {
-        success: false,
-        reason: "cooldown",
-        message: "매칭 쿨다운 중입니다.",
-        nextMatchingTime: new Date(
-          this.lastMatchingTime.getTime() + this.matchingCooldown
-        ),
-      };
-    }
+/**
+ * 스마트 자동 매칭 실행
+ */
+export const findAndCreateRandomBattle = async (options = {}) => {
+  const {
+    maxMatches = 3,
+    allowSameCreator = false,
+    allowCrossCategory = false,
+  } = options;
+
+  try {
+    console.log("🔍 매칭 시작 - maxMatches:", maxMatches);
 
     try {
-      // 1. 매칭 가능한 컨텐츠들 조회
-      const availableContenders = await this.fetchAvailableContenders(
-        maxContenders
+      const contendersQuery = query(
+        collection(db, "contenders"),
+        where("status", "==", "available"),
+        limit(maxMatches * 2)
       );
+
+      const contendersSnapshot = await getDocs(contendersQuery);
+      console.log("📊 조회된 contenders 수:", contendersSnapshot.size);
+
+      if (contendersSnapshot.empty) {
+        return {
+          success: false,
+          reason: "insufficient_contenders",
+          message: "매칭할 수 있는 콘텐츠가 부족합니다.",
+          matchesCreated: 0,
+        };
+      }
+
+      const availableContenders = contendersSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
 
       if (availableContenders.length < 2) {
         return {
           success: false,
           reason: "insufficient_contenders",
-          message: "매칭 가능한 컨텐츠가 부족합니다.",
-          availableCount: availableContenders.length,
+          message: "매칭할 수 있는 콘텐츠가 부족합니다. (최소 2개 필요)",
+          matchesCreated: 0,
         };
       }
 
-      // 2. 최근 배틀 기록 조회 (중복 매칭 방지용)
-      const recentBattles = await this.fetchRecentBattles();
+      let matchesCreated = 0;
+      const matchingScores = [];
 
-      // 3. 순수 매칭 알고리즘으로 최적 매칭 찾기
-      const optimalMatches = this.matchingEngine.findOptimalMatches(
+      // 1단계: 카테고리 내 + 다른 크리에이터 매칭
+      matchesCreated += await tryMatchingWithinCategories(
         availableContenders,
-        recentBattles,
-        maxMatches
+        maxMatches - matchesCreated,
+        matchingScores,
+        false
       );
 
-      if (optimalMatches.length === 0) {
+      // 2단계: 같은 크리에이터 매칭 허용
+      if (matchesCreated < maxMatches && allowSameCreator) {
+        matchesCreated += await tryMatchingWithinCategories(
+          availableContenders,
+          maxMatches - matchesCreated,
+          matchingScores,
+          true
+        );
+      }
+
+      // 3단계: 카테고리 간 매칭 허용
+      if (matchesCreated < maxMatches && allowCrossCategory) {
+        matchesCreated += await tryCrossCategoryMatching(
+          availableContenders,
+          maxMatches - matchesCreated,
+          matchingScores,
+          allowSameCreator
+        );
+      }
+
+      if (matchesCreated === 0) {
         return {
           success: false,
           reason: "no_valid_matches",
           message: "현재 매칭 가능한 조합이 없습니다.",
-          candidateCount: availableContenders.length,
+          matchesCreated: 0,
         };
       }
 
-      // 4. 카테고리 다양성 적용
-      const diversifiedMatches =
-        this.matchingEngine.diversifyByCategory(optimalMatches);
+      return {
+        success: true,
+        matchesCreated,
+        matchingScores,
+        message: `${matchesCreated}개의 배틀이 생성되었습니다.`,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        reason: "insufficient_contenders",
+        message: "콘텐츠를 먼저 업로드해주세요.",
+        matchesCreated: 0,
+      };
+    }
+  } catch (error) {
+    console.error("스마트 매칭 오류:", error);
+    return {
+      success: false,
+      reason: "system_error",
+      message: "매칭 시스템 오류가 발생했습니다.",
+      error: error.message,
+      matchesCreated: 0,
+    };
+  }
+};
 
-      // 5. 배틀 생성 실행
-      const createdBattles = await this.createBattlesFromMatches(
-        diversifiedMatches
+/**
+ * 카테고리 내 매칭 시도
+ */
+async function tryMatchingWithinCategories(
+  availableContenders,
+  maxMatches,
+  matchingScores,
+  allowSameCreator
+) {
+  let matchesCreated = 0;
+
+  // 카테고리별 그룹화
+  const categoryGroups = {};
+  availableContenders.forEach((contender) => {
+    if (contender.status !== "available") return;
+
+    const category = contender.category || "general";
+    if (!categoryGroups[category]) {
+      categoryGroups[category] = [];
+    }
+    categoryGroups[category].push(contender);
+  });
+
+  // 각 카테고리에서 매칭 시도
+  for (const [category, contenders] of Object.entries(categoryGroups)) {
+    if (contenders.length < 2 || matchesCreated >= maxMatches) continue;
+
+    const shuffled = [...contenders].sort(() => Math.random() - 0.5);
+
+    for (
+      let i = 0;
+      i < shuffled.length - 1 && matchesCreated < maxMatches;
+      i += 2
+    ) {
+      const contender1 = shuffled[i];
+      const contender2 = shuffled[i + 1];
+
+      if (
+        contender1.status !== "available" ||
+        contender2.status !== "available"
+      ) {
+        continue;
+      }
+
+      // 같은 크리에이터 체크
+      if (!allowSameCreator && contender1.creatorId === contender2.creatorId) {
+        continue;
+      }
+
+      try {
+        const battleId = await createBattleFromContenders(
+          contender1,
+          contender2
+        );
+
+        const matchingScore = calculateMatchingScore(contender1, contender2);
+
+        matchingScores.push({
+          battleId,
+          contender1: contender1.title,
+          contender2: contender2.title,
+          category,
+          score: matchingScore,
+          sameCreator: contender1.creatorId === contender2.creatorId,
+        });
+
+        // 사용된 콘텐츠 표시
+        contender1.status = "in_battle";
+        contender2.status = "in_battle";
+
+        matchesCreated++;
+      } catch (error) {
+        console.error("배틀 생성 실패:", error.message);
+      }
+    }
+  }
+
+  return matchesCreated;
+}
+
+/**
+ * 카테고리 간 매칭 시도
+ */
+async function tryCrossCategoryMatching(
+  availableContenders,
+  maxMatches,
+  matchingScores,
+  allowSameCreator
+) {
+  let matchesCreated = 0;
+
+  const available = availableContenders.filter((c) => c.status === "available");
+
+  if (available.length < 2) {
+    return 0;
+  }
+
+  const shuffled = [...available].sort(() => Math.random() - 0.5);
+
+  for (
+    let i = 0;
+    i < shuffled.length - 1 && matchesCreated < maxMatches;
+    i += 2
+  ) {
+    const contender1 = shuffled[i];
+    const contender2 = shuffled[i + 1];
+
+    // 같은 크리에이터 체크
+    if (!allowSameCreator && contender1.creatorId === contender2.creatorId) {
+      continue;
+    }
+
+    try {
+      const battleId = await createBattleFromContendersFlexible(
+        contender1,
+        contender2
       );
 
-      // 6. 매칭 시간 업데이트
-      this.lastMatchingTime = new Date();
+      const matchingScore = calculateMatchingScore(contender1, contender2) - 20;
+
+      matchingScores.push({
+        battleId,
+        contender1: contender1.title,
+        contender2: contender2.title,
+        category: `${contender1.category} vs ${contender2.category}`,
+        score: matchingScore,
+        crossCategory: true,
+        sameCreator: contender1.creatorId === contender2.creatorId,
+      });
+
+      // 사용된 콘텐츠 표시
+      contender1.status = "in_battle";
+      contender2.status = "in_battle";
+
+      matchesCreated++;
+    } catch (error) {
+      console.error("카테고리 간 배틀 생성 실패:", error.message);
+    }
+  }
+
+  return matchesCreated;
+}
+
+// ==================== 고급 매칭 함수들 ====================
+
+/**
+ * 강제 매칭 실행
+ */
+export const executeForceMatching = async (maxMatches = 5) => {
+  try {
+    const result = await findAndCreateRandomBattle({
+      maxMatches,
+      allowSameCreator: true,
+      allowCrossCategory: true,
+    });
+    return {
+      ...result,
+      forcedMatching: true,
+    };
+  } catch (error) {
+    console.error("강제 매칭 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+      matchesCreated: 0,
+    };
+  }
+};
+
+/**
+ * 즉시 매칭 실행 (테스트용)
+ */
+export const createBattleNow = async () => {
+  console.log("🚀 즉시 매칭 실행 (모든 제한 해제)");
+
+  const result = await findAndCreateRandomBattle({
+    maxMatches: 1,
+    allowSameCreator: true,
+    allowCrossCategory: true,
+  });
+
+  return result;
+};
+
+/**
+ * 강제 카테고리 무시 배틀 생성
+ */
+export const forceCreateBattleAnyCategory = async (maxMatches = 1) => {
+  try {
+    console.log("🚀 강제 매칭 시작 (카테고리 무시)");
+
+    const contendersQuery = query(
+      collection(db, "contenders"),
+      where("status", "==", "available"),
+      limit(10)
+    );
+
+    const contendersSnapshot = await getDocs(contendersQuery);
+
+    if (contendersSnapshot.size < 2) {
+      return {
+        success: false,
+        reason: "insufficient_contenders",
+        message: "매칭할 콘텐츠가 부족합니다.",
+        matchesCreated: 0,
+      };
+    }
+
+    const availableContenders = contendersSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    // 다른 크리에이터 콘텐츠만 필터링
+    const differentCreators = [];
+    const usedCreators = new Set();
+
+    for (const contender of availableContenders) {
+      if (!usedCreators.has(contender.creatorId)) {
+        differentCreators.push(contender);
+        usedCreators.add(contender.creatorId);
+      }
+    }
+
+    if (differentCreators.length < 2) {
+      // 같은 크리에이터도 허용하는 매칭
+      const contender1 = availableContenders[0];
+      const contender2 = availableContenders[1];
+
+      try {
+        const battleId = await createBattleFromContendersForce(
+          contender1,
+          contender2
+        );
+
+        return {
+          success: true,
+          matchesCreated: 1,
+          message: "강제 매칭으로 배틀이 생성되었습니다.",
+          battleId,
+          note: "같은 크리에이터 콘텐츠로 매칭됨",
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.message,
+          matchesCreated: 0,
+        };
+      }
+    }
+
+    // 서로 다른 크리에이터로 매칭
+    const contender1 = differentCreators[0];
+    const contender2 = differentCreators[1];
+
+    try {
+      const battleId = await createBattleFromContenders(contender1, contender2);
 
       return {
         success: true,
-        matchesCreated: createdBattles.length,
-        battles: createdBattles,
-        matchingScores: diversifiedMatches.map((m) => ({
-          contenders: [m.contenderA.title, m.contenderB.title],
-          score: m.score,
-          category: m.contenderA.category,
-        })),
+        matchesCreated: 1,
+        message: "강제 매칭으로 배틀이 생성되었습니다.",
+        battleId,
       };
     } catch (error) {
-      console.error("Smart matching error:", error);
       return {
         success: false,
-        reason: "system_error",
-        message: "매칭 시스템 오류가 발생했습니다.",
         error: error.message,
+        matchesCreated: 0,
       };
     }
+  } catch (error) {
+    console.error("강제 매칭 시스템 오류:", error);
+    return {
+      success: false,
+      reason: "system_error",
+      message: "강제 매칭 시스템 오류가 발생했습니다.",
+      error: error.message,
+      matchesCreated: 0,
+    };
   }
+};
 
-  /**
-   * 쿨다운 상태 체크
-   */
-  isInCooldown() {
-    if (!this.lastMatchingTime) return false;
-    return Date.now() - this.lastMatchingTime.getTime() < this.matchingCooldown;
-  }
-
-  /**
-   * 매칭 가능한 컨텐츠들 조회
-   */
-  async fetchAvailableContenders(maxContenders = 50) {
-    const contendersRef = collection(db, "contenders");
-    const q = query(
-      contendersRef,
-      where("status", "==", "available"),
-      orderBy("createdAt", "desc"),
-      limit(maxContenders)
-    );
-
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      // 추가 메타데이터
-      likeCount: doc.data().likeCount || 0,
-      viewCount: doc.data().viewCount || 0,
-    }));
-  }
-
-  /**
-   * 최근 배틀 기록 조회 (중복 방지용)
-   */
-  async fetchRecentBattles(daysBack = 7) {
-    const battlesRef = collection(db, "battles");
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-
-    const q = query(
-      battlesRef,
-      where("createdAt", ">=", cutoffDate),
-      orderBy("createdAt", "desc")
-    );
-
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map((doc) => doc.data());
-  }
-
-  /**
-   * 매칭 결과로부터 실제 배틀들 생성
-   */
-  async createBattlesFromMatches(matches) {
-    const createdBattles = [];
-
-    for (const match of matches) {
-      try {
-        const battleId = await this.createSingleBattle(
-          match.contenderA,
-          match.contenderB
-        );
-        createdBattles.push({
-          id: battleId,
-          contenderA: match.contenderA.title,
-          contenderB: match.contenderB.title,
-          category: match.contenderA.category,
-          score: match.score,
-        });
-      } catch (error) {
-        console.error(
-          `Failed to create battle for ${match.contenderA.title} vs ${match.contenderB.title}:`,
-          error
-        );
-      }
-    }
-
-    return createdBattles;
-  }
-
-  /**
-   * 단일 배틀 생성 (트랜잭션)
-   */
-  async createSingleBattle(contenderA, contenderB) {
-    return await runTransaction(db, async (transaction) => {
-      const contenderRefA = doc(db, "contenders", contenderA.id);
-      const contenderRefB = doc(db, "contenders", contenderB.id);
-
-      // 상태 재확인
-      const contenderDocA = await transaction.get(contenderRefA);
-      const contenderDocB = await transaction.get(contenderRefB);
-
-      if (
-        !contenderDocA.exists() ||
-        contenderDocA.data().status !== "available" ||
-        !contenderDocB.exists() ||
-        contenderDocB.data().status !== "available"
-      ) {
-        throw new Error("선택된 컨텐츠 중 하나가 이미 사용 중입니다.");
-      }
-
-      // 배틀 데이터 생성
-      const battleData = {
-        creatorId: contenderA.creatorId,
-        creatorName: contenderA.creatorName,
-        title: `${contenderA.title} vs ${contenderB.title}`,
-        category: contenderA.category,
-        itemA: {
-          title: contenderA.title,
-          imageUrl: contenderA.imageUrl,
-          votes: 0,
-          contenderId: contenderA.id,
-        },
-        itemB: {
-          title: contenderB.title,
-          imageUrl: contenderB.imageUrl,
-          votes: 0,
-          contenderId: contenderB.id,
-        },
-        status: "ongoing",
-        createdAt: serverTimestamp(),
-        endsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7일 후
-        totalVotes: 0,
-        participants: [],
-
-        // 매칭 메타데이터
-        matchingMethod: "smart_algorithm",
-        matchingScore: this.matchingEngine.calculateMatchScore(
-          contenderA,
-          contenderB
-        ),
-      };
-
-      const battleRef = doc(collection(db, "battles"));
-
-      // 트랜잭션으로 안전하게 생성
-      transaction.set(battleRef, battleData);
-      transaction.update(contenderRefA, { status: "in_battle" });
-      transaction.update(contenderRefB, { status: "in_battle" });
-
-      return battleRef.id;
-    });
-  }
-
-  /**
-   * 매칭 통계 조회
-   */
-  async getMatchingStats() {
+/**
+ * 매칭 통계 조회
+ */
+export const getMatchingStatistics = async () => {
+  try {
     const stats = {
       totalAvailableContenders: 0,
-      categoryDistribution: {},
-      lastMatchingTime: this.lastMatchingTime,
-      nextAvailableMatching: this.isInCooldown()
-        ? new Date(this.lastMatchingTime.getTime() + this.matchingCooldown)
-        : new Date(),
-      cooldownRemaining: this.isInCooldown()
-        ? this.matchingCooldown - (Date.now() - this.lastMatchingTime.getTime())
-        : 0,
+      totalActiveBattles: 0,
+      categoryDistribution: {
+        music: 0,
+        fashion: 0,
+        food: 0,
+      },
+      platformDistribution: {
+        image: 0,
+        youtube: 0,
+        instagram: 0,
+        tiktok: 0,
+      },
+      cooldownRemaining: 0,
+      lastMatchingTime: new Date(),
+      systemHealth: "active",
     };
 
     try {
-      const contenders = await this.fetchAvailableContenders(100);
-      stats.totalAvailableContenders = contenders.length;
+      const contendersQuery = query(
+        collection(db, "contenders"),
+        where("status", "==", "available")
+      );
+      const contendersSnapshot = await getDocs(contendersQuery);
+      stats.totalAvailableContenders = contendersSnapshot.size;
 
-      contenders.forEach((contender) => {
-        stats.categoryDistribution[contender.category] =
-          (stats.categoryDistribution[contender.category] || 0) + 1;
+      contendersSnapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        const category = data.category || "general";
+        const platform = data.platform || "image";
+
+        if (stats.categoryDistribution[category] !== undefined) {
+          stats.categoryDistribution[category]++;
+        }
+
+        if (stats.platformDistribution[platform] !== undefined) {
+          stats.platformDistribution[platform]++;
+        }
       });
     } catch (error) {
-      console.error("Error fetching matching stats:", error);
+      console.log("Contenders collection query error:", error);
     }
 
-    return stats;
+    try {
+      const activeBattlesQuery = query(
+        collection(db, "battles"),
+        where("status", "==", "ongoing")
+      );
+      const activeBattlesSnapshot = await getDocs(activeBattlesQuery);
+      stats.totalActiveBattles = activeBattlesSnapshot.size;
+    } catch (error) {
+      console.log("Battles collection query error:", error);
+    }
+
+    return {
+      success: true,
+      stats,
+    };
+  } catch (error) {
+    console.error("매칭 통계 조회 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+      stats: {
+        totalAvailableContenders: 0,
+        totalActiveBattles: 0,
+        categoryDistribution: {
+          music: 0,
+          fashion: 0,
+          food: 0,
+        },
+        platformDistribution: {
+          image: 0,
+          youtube: 0,
+          instagram: 0,
+          tiktok: 0,
+        },
+        cooldownRemaining: 0,
+        systemHealth: "error",
+      },
+    };
   }
-}
-
-// 싱글톤 인스턴스 생성
-const advancedMatchingService = new AdvancedMatchingService();
-
-// 기존 함수를 새로운 시스템으로 대체
-export const findAndCreateRandomBattle = async (options = {}) => {
-  return await advancedMatchingService.executeSmartMatching(options);
 };
-
-// 추가 유틸리티 함수들
-export const getMatchingStats = async () => {
-  return await advancedMatchingService.getMatchingStats();
-};
-
-export const forceMatching = async (maxMatches = 5) => {
-  return await advancedMatchingService.executeSmartMatching({
-    maxMatches,
-    forceCooldown: true,
-  });
-};
-
-// 기존 createBattleFromContenders 함수 (수동 배틀 생성용)
-export const createBattleFromContenders = async (contenderA, contenderB) => {
-  return await advancedMatchingService.createSingleBattle(
-    contenderA,
-    contenderB
-  );
-};
-
-export default advancedMatchingService;

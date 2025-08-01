@@ -1,9 +1,6 @@
-// src/components/BattleDetail/BattleVSSection.jsx - VS 투표 섹션 (YouTube 재생 수정)
+// src/components/BattleDetail/BattleVSSection.jsx - 다중 플랫폼 지원 업데이트
 
 import React, { useState } from "react";
-import { voteOnBattle } from "../../services/battleService";
-import MediaPlayerModal from "../MediaPlayerModal";
-import toast from "react-hot-toast";
 import {
   Heart,
   MessageCircle,
@@ -11,13 +8,100 @@ import {
   Trophy,
   Users,
   Clock,
-  Play, // ← YouTube 재생 버튼용
-  Youtube, // ← YouTube 아이콘용 (필요시)
-  Instagram, // ← Instagram 아이콘용 (필요시)
-  Image, // ← 이미지 아이콘용 (필요시)
-  ExternalLink, // ← 외부 링크 아이콘용 (필요시)
+  Play,
+  Youtube,
+  Instagram,
+  Image,
+  ExternalLink,
   ThumbsUp,
+  SkipForward,
 } from "lucide-react";
+
+// 모의 voteOnBattle 함수
+const voteOnBattle = async (battleId, choice) => {
+  // 실제 구현에서는 실제 API 호출
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve({
+        success: true,
+        newVoteCount: Math.floor(Math.random() * 100),
+        newTotalVotes: Math.floor(Math.random() * 1000),
+        currentLeader: {
+          winner: choice,
+          percentage: Math.floor(Math.random() * 100),
+          margin: Math.floor(Math.random() * 50),
+        },
+      });
+    }, 1000);
+  });
+};
+
+// 간단한 toast 함수
+const toast = {
+  success: (message) => {
+    console.log("✅ Success:", message);
+    alert("✅ " + message);
+  },
+  error: (message) => {
+    console.log("❌ Error:", message);
+    alert("❌ " + message);
+  },
+};
+
+// 간단한 MediaPlayerModal 컴포넌트
+const MediaPlayerModal = ({ isOpen, onClose, contentData }) => {
+  if (!isOpen || !contentData) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-gray-800">
+        <div className="flex items-center justify-between p-6 border-b border-gray-800">
+          <h2 className="text-xl font-bold text-white">{contentData.title}</h2>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-white transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-6">
+          {contentData.platform === "youtube" && (
+            <div className="aspect-video bg-gray-800 rounded-lg flex items-center justify-center">
+              <div className="text-center">
+                <Youtube className="w-16 h-16 text-red-500 mx-auto mb-4" />
+                <p className="text-white">YouTube 비디오</p>
+                <p className="text-gray-400 text-sm">{contentData.title}</p>
+              </div>
+            </div>
+          )}
+          {contentData.platform === "instagram" && (
+            <div className="aspect-square max-w-md mx-auto bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
+              <div className="text-center">
+                <Instagram className="w-16 h-16 text-white mx-auto mb-4" />
+                <p className="text-white">Instagram 콘텐츠</p>
+              </div>
+            </div>
+          )}
+          {contentData.platform === "tiktok" && (
+            <div className="aspect-[9/16] max-w-sm mx-auto bg-gradient-to-br from-red-500 to-blue-500 rounded-lg flex items-center justify-center">
+              <div className="text-center">
+                <Play className="w-16 h-16 text-white mx-auto mb-4" />
+                <p className="text-white">TikTok 비디오</p>
+              </div>
+            </div>
+          )}
+          {contentData.platform === "image" && (
+            <img
+              src={contentData.imageUrl}
+              alt={contentData.title}
+              className="w-full h-auto max-h-[70vh] object-contain rounded-lg"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const BattleVSSection = ({
   battle,
@@ -48,10 +132,9 @@ const BattleVSSection = ({
       return;
     }
 
-    // 이미 participants에 포함되어 있는지 다시 한번 확인
     if (battle.participants?.includes(user.uid)) {
       toast.error("이미 이 배틀에 투표했습니다.");
-      onVote(true, choice); // UI 상태 동기화
+      onVote(true, choice);
       return;
     }
 
@@ -96,13 +179,11 @@ const BattleVSSection = ({
     } catch (error) {
       console.error("투표 오류:", error);
 
-      // 에러 메시지 개선
       if (error.message.includes("이미 이 배틀에 투표했습니다")) {
         toast.error("이미 투표하셨습니다.");
-        onVote(true, choice); // UI 상태 동기화
+        onVote(true, choice);
       } else {
         toast.error("투표 중 오류가 발생했습니다.");
-        // 실패 시 원래 상태로 복구
         onBattleUpdate(battle);
         onVote(false, null);
       }
@@ -110,57 +191,58 @@ const BattleVSSection = ({
   };
 
   const handleItemImageClick = (item, choice) => {
-    // YouTube 콘텐츠인 경우 항상 모달로 재생 (투표는 절대 실행하지 않음)
-    if (item.contentType === "youtube") {
-      setSelectedContent({
-        contentType: "youtube",
-        title: item.title,
-        description: item.description,
-        youtubeId: item.youtubeId,
-        youtubeUrl: item.youtubeUrl,
-        creatorName: item.creatorName,
-        imageUrl: item.imageUrl,
-        thumbnailUrl:
-          item.thumbnailUrl ||
-          `https://img.youtube.com/vi/${item.youtubeId}/maxresdefault.jpg`,
-      });
-      setShowMediaModal(true);
-      return;
-    }
+    const platform = item.platform || "image";
 
-    // Instagram 콘텐츠인 경우 항상 모달로 표시 (투표는 절대 실행하지 않음)
-    if (item.contentType === "instagram") {
-      setSelectedContent({
-        contentType: "instagram",
-        title: item.title,
-        description: item.description,
-        instagramUrl: item.instagramUrl,
-        creatorName: item.creatorName,
-        imageUrl: item.imageUrl,
-      });
-      setShowMediaModal(true);
-      return;
-    }
-
-    // 일반 이미지인 경우: 이미지 확대 보기만 제공 (투표는 버튼으로만)
-    setSelectedContent({
-      contentType: "image",
+    // 컨텐츠 데이터 준비
+    let contentData = {
+      platform: platform,
       title: item.title,
       description: item.description,
-      imageUrl: item.imageUrl,
       creatorName: item.creatorName,
-    });
+      imageUrl: item.imageUrl,
+    };
+
+    // 플랫폼별 데이터 추가
+    if (platform === "youtube") {
+      contentData = {
+        ...contentData,
+        extractedData: item.extractedData || {
+          videoId: item.youtubeId,
+          originalUrl: item.youtubeUrl,
+          thumbnailUrl:
+            item.thumbnailUrl ||
+            `https://img.youtube.com/vi/${item.youtubeId}/maxresdefault.jpg`,
+        },
+        timeSettings: item.timeSettings || null,
+      };
+    } else if (platform === "instagram") {
+      contentData = {
+        ...contentData,
+        extractedData: item.extractedData || {
+          originalUrl: item.instagramUrl,
+          postType: item.postType || "p",
+        },
+      };
+    } else if (platform === "tiktok") {
+      contentData = {
+        ...contentData,
+        extractedData: item.extractedData || {
+          originalUrl: item.tiktokUrl,
+          videoId: item.tiktokId,
+        },
+      };
+    }
+
+    setSelectedContent(contentData);
     setShowMediaModal(true);
   };
 
   const handleVoteButtonClick = (choice) => {
-    // 이미 투표한 경우 중복 투표 방지
     if (hasVoted) {
       toast.error("이미 투표하셨습니다. 한 번만 투표할 수 있습니다.");
       return;
     }
 
-    // 배틀이 종료된 경우
     if (battle.status === "ended") {
       toast.error("종료된 배틀입니다.");
       return;
@@ -178,6 +260,65 @@ const BattleVSSection = ({
     };
   };
 
+  const getPlatformIcon = (platform) => {
+    switch (platform) {
+      case "youtube":
+        return <Youtube className="w-4 h-4 text-red-500" />;
+      case "instagram":
+        return <Instagram className="w-4 h-4 text-pink-500" />;
+      case "tiktok":
+        return (
+          <div className="w-4 h-4 bg-gradient-to-r from-red-500 to-blue-500 rounded text-white text-xs flex items-center justify-center font-bold">
+            T
+          </div>
+        );
+      case "image":
+      default:
+        return <Image className="w-4 h-4 text-gray-500" />;
+    }
+  };
+
+  const getPlatformName = (platform) => {
+    switch (platform) {
+      case "youtube":
+        return "YouTube";
+      case "instagram":
+        return "Instagram";
+      case "tiktok":
+        return "TikTok";
+      case "image":
+      default:
+        return "이미지";
+    }
+  };
+
+  const getMediaThumbnail = (item) => {
+    const platform = item.platform || "image";
+
+    if (platform === "youtube") {
+      return (
+        item.extractedData?.thumbnailUrl ||
+        item.thumbnailUrl ||
+        `https://img.youtube.com/vi/${item.youtubeId}/maxresdefault.jpg`
+      );
+    }
+
+    return item.imageUrl || "/images/popo.png";
+  };
+
+  const formatTime = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s
+        .toString()
+        .padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
   const percentage = getWinningPercentage();
   const totalVotes = (battle.itemA.votes || 0) + (battle.itemB.votes || 0);
   const isEnded = battle.status === "ended";
@@ -187,6 +328,7 @@ const BattleVSSection = ({
     const isWinner = isEnded && battle.finalResult?.winner === choice;
     const percentageValue = isLeft ? percentage.left : percentage.right;
     const gradientColor = isLeft ? "pink" : "blue";
+    const platform = item.platform || "image";
 
     return (
       <div className="space-y-4">
@@ -200,34 +342,25 @@ const BattleVSSection = ({
             }
             ${hasVoted && !isSelected ? "opacity-70" : ""}
           `}
-          title={
-            item.contentType === "youtube"
-              ? "클릭하여 YouTube 재생"
-              : item.contentType === "instagram"
-              ? "클릭하여 Instagram 보기"
-              : "클릭하여 이미지 확대"
-          }
+          title={`클릭하여 ${getPlatformName(platform)} 콘텐츠 보기`}
         >
           {/* 이미지 또는 썸네일 */}
           <img
-            src={
-              item.contentType === "youtube"
-                ? item.thumbnailUrl ||
-                  `https://img.youtube.com/vi/${item.youtubeId}/maxresdefault.jpg`
-                : item.imageUrl || item.thumbnailUrl || "/images/popo.png"
-            }
+            src={getMediaThumbnail(item)}
             alt={item.title}
             className="w-full h-64 object-cover"
             loading="lazy"
             onError={(e) => {
-              if (item.contentType === "youtube") {
+              if (platform === "youtube") {
                 e.target.src = `https://img.youtube.com/vi/${item.youtubeId}/hqdefault.jpg`;
+              } else {
+                e.target.src = "/images/popo.png";
               }
             }}
           />
 
-          {/* YouTube 콘텐츠 오버레이 */}
-          {item.contentType === "youtube" && (
+          {/* 플랫폼별 오버레이 */}
+          {platform === "youtube" && (
             <div className="absolute inset-0 bg-black/30 flex items-center justify-center transition-all group-hover:bg-black/40">
               <div className="bg-red-600 hover:bg-red-700 rounded-full p-3 transition-all transform group-hover:scale-110 shadow-lg">
                 <Play className="w-6 h-6 text-white fill-current ml-0.5" />
@@ -235,16 +368,25 @@ const BattleVSSection = ({
             </div>
           )}
 
-          {/* YouTube 로고 */}
-          {item.contentType === "youtube" && (
-            <div className="absolute top-4 right-4 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
-              <Youtube className="w-3 h-3" />
-              YouTube
+          {(platform === "instagram" || platform === "tiktok") && (
+            <div className="absolute inset-0 bg-black/30 flex items-center justify-center transition-all group-hover:bg-black/40">
+              <div
+                className={`${
+                  platform === "instagram"
+                    ? "bg-gradient-to-r from-purple-500 to-pink-500"
+                    : "bg-gradient-to-r from-red-500 to-blue-500"
+                } hover:scale-110 rounded-full p-3 transition-all shadow-lg`}
+              >
+                {platform === "instagram" ? (
+                  <Instagram className="w-6 h-6 text-white" />
+                ) : (
+                  <Play className="w-6 h-6 text-white fill-current ml-0.5" />
+                )}
+              </div>
             </div>
           )}
 
-          {/* 일반 이미지 오버레이 */}
-          {item.contentType === "image" && (
+          {platform === "image" && (
             <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
               <div className="text-center bg-black/70 rounded-xl p-3">
                 <div className="text-white text-sm font-medium">
@@ -254,9 +396,50 @@ const BattleVSSection = ({
             </div>
           )}
 
+          {/* 플랫폼 로고/배지 */}
+          <div className="absolute top-4 right-4">
+            {platform === "youtube" && (
+              <div className="bg-red-600 text-white px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                <Youtube className="w-3 h-3" />
+                YouTube
+              </div>
+            )}
+            {platform === "instagram" && (
+              <div className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                <Instagram className="w-3 h-3" />
+                Instagram
+              </div>
+            )}
+            {platform === "tiktok" && (
+              <div className="bg-gradient-to-r from-red-500 to-blue-500 text-white px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                <div className="w-3 h-3 flex items-center justify-center font-bold text-[10px]">
+                  T
+                </div>
+                TikTok
+              </div>
+            )}
+          </div>
+
+          {/* 시간 설정 표시 (YouTube만) */}
+          {platform === "youtube" &&
+            item.timeSettings &&
+            (item.timeSettings.startTime > 0 ||
+              item.timeSettings.endTime > 0) && (
+              <div className="absolute bottom-4 left-4 bg-black/80 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {item.timeSettings.startTime > 0 &&
+                  formatTime(item.timeSettings.startTime)}
+                {item.timeSettings.startTime > 0 &&
+                  item.timeSettings.endTime > 0 &&
+                  " ~ "}
+                {item.timeSettings.endTime > 0 &&
+                  formatTime(item.timeSettings.endTime)}
+              </div>
+            )}
+
           {/* 승자 배지 */}
           {isWinner && (
-            <div className="absolute top-4 right-4 bg-yellow-500 text-black px-3 py-1 rounded-full font-bold flex items-center gap-1">
+            <div className="absolute top-4 left-4 bg-yellow-500 text-black px-3 py-1 rounded-full font-bold flex items-center gap-1">
               <Trophy className="w-4 h-4" />
               Winner
             </div>
@@ -277,13 +460,23 @@ const BattleVSSection = ({
           <h3 className="text-xl font-semibold mb-2">{item.title}</h3>
           <p className="text-sm text-gray-400 mb-2">by {item.creatorName}</p>
 
-          {/* 콘텐츠 타입 표시 */}
-          {item.contentType === "youtube" && (
-            <div className="flex items-center justify-center gap-1 mb-2 text-red-400">
-              <Youtube className="w-4 h-4" />
-              <span className="text-xs">YouTube</span>
-            </div>
-          )}
+          {/* 콘텐츠 타입 및 플랫폼 표시 */}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            {getPlatformIcon(platform)}
+            <span className="text-xs text-gray-400">
+              {getPlatformName(platform)}
+            </span>
+            {platform === "youtube" &&
+              item.timeSettings &&
+              (item.timeSettings.startTime > 0 ||
+                item.timeSettings.endTime > 0) && (
+                <>
+                  <span className="text-gray-600">•</span>
+                  <Clock className="w-3 h-3 text-blue-400" />
+                  <span className="text-xs text-blue-400">구간 재생</span>
+                </>
+              )}
+          </div>
 
           {hasVoted && (
             <>
@@ -335,6 +528,28 @@ const BattleVSSection = ({
       />
 
       <div className="bg-gray-800/50 rounded-2xl p-6 mb-8">
+        {/* 배틀 헤더 정보 */}
+        <div className="text-center mb-6">
+          <div className="flex items-center justify-center gap-4 mb-2">
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              {getPlatformIcon(battle.itemA.platform || "image")}
+              <span>{getPlatformName(battle.itemA.platform || "image")}</span>
+            </div>
+            <span className="text-gray-600">VS</span>
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              {getPlatformIcon(battle.itemB.platform || "image")}
+              <span>{getPlatformName(battle.itemB.platform || "image")}</span>
+            </div>
+          </div>
+
+          {/* 플랫폼 간 배틀 표시 */}
+          {battle.itemA.platform !== battle.itemB.platform && (
+            <div className="inline-flex items-center gap-2 bg-purple-900/30 border border-purple-700/50 rounded-full px-4 py-2 text-sm">
+              <span className="text-purple-400">크로스 플랫폼 배틀</span>
+            </div>
+          )}
+        </div>
+
         <div className="grid md:grid-cols-2 gap-6 mb-6">
           {/* 왼쪽 콘텐츠 (itemA) */}
           {renderContentItem(battle.itemA, "itemA", true)}
@@ -381,6 +596,36 @@ const BattleVSSection = ({
           </p>
         </div>
 
+        {/* 배틀 특징 표시 */}
+        <div className="mt-4 flex justify-center gap-2 flex-wrap">
+          {/* 미디어 콘텐츠 배틀 */}
+          {(battle.itemA.platform !== "image" ||
+            battle.itemB.platform !== "image") && (
+            <div className="inline-flex items-center gap-1 bg-blue-900/30 border border-blue-700/50 rounded-full px-3 py-1 text-xs text-blue-400">
+              <Play className="w-3 h-3" />
+              미디어 배틀
+            </div>
+          )}
+
+          {/* YouTube 시간 설정 배틀 */}
+          {((battle.itemA.platform === "youtube" &&
+            battle.itemA.timeSettings) ||
+            (battle.itemB.platform === "youtube" &&
+              battle.itemB.timeSettings)) && (
+            <div className="inline-flex items-center gap-1 bg-red-900/30 border border-red-700/50 rounded-full px-3 py-1 text-xs text-red-400">
+              <Clock className="w-3 h-3" />
+              구간 재생
+            </div>
+          )}
+
+          {/* HOT 배틀 */}
+          {battle.isHot && (
+            <div className="inline-flex items-center gap-1 bg-orange-900/30 border border-orange-700/50 rounded-full px-3 py-1 text-xs text-orange-400">
+              🔥 HOT
+            </div>
+          )}
+        </div>
+
         {/* 배틀 종료 결과 */}
         {isEnded && battle.finalResult && (
           <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-center">
@@ -401,6 +646,25 @@ const BattleVSSection = ({
             <p className="text-sm text-gray-400 mt-1">
               최종 점수: {battle.itemA.votes}표 vs {battle.itemB.votes}표
             </p>
+
+            {/* 승리한 플랫폼 표시 */}
+            {battle.finalResult.winner !== "tie" && (
+              <div className="mt-2 flex items-center justify-center gap-2">
+                <span className="text-xs text-gray-500">승리 플랫폼:</span>
+                {getPlatformIcon(
+                  battle.finalResult.winner === "itemA"
+                    ? battle.itemA.platform
+                    : battle.itemB.platform
+                )}
+                <span className="text-xs text-gray-400">
+                  {getPlatformName(
+                    battle.finalResult.winner === "itemA"
+                      ? battle.itemA.platform
+                      : battle.itemB.platform
+                  )}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
