@@ -1,5 +1,3 @@
-// src/components/BattleDetail/BattleVSSection.jsx - 다중 플랫폼 지원 업데이트
-
 import React, { useState } from "react";
 import {
   Heart,
@@ -16,6 +14,9 @@ import {
   ThumbsUp,
   SkipForward,
 } from "lucide-react";
+
+// 실제 MediaPlayerModal import (경로는 실제 파일 위치에 맞게 수정)
+import MediaPlayerModal from "../MediaPlayerModal"; // 또는 적절한 경로
 
 // 모의 voteOnBattle 함수
 const voteOnBattle = async (battleId, choice) => {
@@ -46,61 +47,6 @@ const toast = {
     console.log("❌ Error:", message);
     alert("❌ " + message);
   },
-};
-
-// 간단한 MediaPlayerModal 컴포넌트
-const MediaPlayerModal = ({ isOpen, onClose, contentData }) => {
-  if (!isOpen || !contentData) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-gray-800">
-        <div className="flex items-center justify-between p-6 border-b border-gray-800">
-          <h2 className="text-xl font-bold text-white">{contentData.title}</h2>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="p-6">
-          {contentData.platform === "youtube" && (
-            <div className="aspect-video bg-gray-800 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <Youtube className="w-16 h-16 text-red-500 mx-auto mb-4" />
-                <p className="text-white">YouTube 비디오</p>
-                <p className="text-gray-400 text-sm">{contentData.title}</p>
-              </div>
-            </div>
-          )}
-          {contentData.platform === "instagram" && (
-            <div className="aspect-square max-w-md mx-auto bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <Instagram className="w-16 h-16 text-white mx-auto mb-4" />
-                <p className="text-white">Instagram 콘텐츠</p>
-              </div>
-            </div>
-          )}
-          {contentData.platform === "tiktok" && (
-            <div className="aspect-[9/16] max-w-sm mx-auto bg-gradient-to-br from-red-500 to-blue-500 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <Play className="w-16 h-16 text-white mx-auto mb-4" />
-                <p className="text-white">TikTok 비디오</p>
-              </div>
-            </div>
-          )}
-          {contentData.platform === "image" && (
-            <img
-              src={contentData.imageUrl}
-              alt={contentData.title}
-              className="w-full h-auto max-h-[70vh] object-contain rounded-lg"
-            />
-          )}
-        </div>
-      </div>
-    </div>
-  );
 };
 
 const BattleVSSection = ({
@@ -191,7 +137,23 @@ const BattleVSSection = ({
   };
 
   const handleItemImageClick = (item, choice) => {
+    // 🚨 클릭 이벤트 상세 로그
+    console.log("🖱️ === 이미지 클릭 이벤트 발생 ===");
+    console.log("📅 클릭 시간:", new Date().toLocaleTimeString());
+    console.log("🎯 클릭된 아이템:", choice, "(itemA 또는 itemB)");
+    console.log("📄 아이템 데이터:", item);
+    console.log("🔧 아이템 상세 정보:");
+    console.log("  - 제목:", item.title);
+    console.log("  - 플랫폼:", item.platform);
+    console.log("  - 생성자:", item.creatorName);
+    console.log("  - YouTube ID:", item.youtubeId);
+    console.log("  - YouTube URL:", item.youtubeUrl);
+    console.log("  - 추출 데이터:", item.extractedData);
+    console.log("  - 시간 설정:", item.timeSettings);
+    console.log("  - 이미지 URL:", item.imageUrl);
+
     const platform = item.platform || "image";
+    console.log("🔍 감지된 플랫폼:", platform);
 
     // 컨텐츠 데이터 준비
     let contentData = {
@@ -202,10 +164,16 @@ const BattleVSSection = ({
       imageUrl: item.imageUrl,
     };
 
+    console.log("📦 기본 contentData 생성:", contentData);
+
     // 플랫폼별 데이터 추가
     if (platform === "youtube") {
+      console.log("🎬 YouTube 콘텐츠 처리 중...");
+
       contentData = {
         ...contentData,
+        youtubeId: item.youtubeId,
+        youtubeUrl: item.youtubeUrl,
         extractedData: item.extractedData || {
           videoId: item.youtubeId,
           originalUrl: item.youtubeUrl,
@@ -214,8 +182,13 @@ const BattleVSSection = ({
             `https://img.youtube.com/vi/${item.youtubeId}/maxresdefault.jpg`,
         },
         timeSettings: item.timeSettings || null,
+        isLiveStream: item.isLiveStream || false,
       };
+
+      console.log("✅ YouTube contentData 완성:", contentData);
     } else if (platform === "instagram") {
+      console.log("📷 Instagram 콘텐츠 처리 중...");
+
       contentData = {
         ...contentData,
         extractedData: item.extractedData || {
@@ -223,7 +196,11 @@ const BattleVSSection = ({
           postType: item.postType || "p",
         },
       };
+
+      console.log("✅ Instagram contentData 완성:", contentData);
     } else if (platform === "tiktok") {
+      console.log("🎵 TikTok 콘텐츠 처리 중...");
+
       contentData = {
         ...contentData,
         extractedData: item.extractedData || {
@@ -231,13 +208,25 @@ const BattleVSSection = ({
           videoId: item.tiktokId,
         },
       };
+
+      console.log("✅ TikTok contentData 완성:", contentData);
     }
+
+    console.log("🎯 최종 contentData:", contentData);
+    console.log("🚀 모달 열기 시도...");
 
     setSelectedContent(contentData);
     setShowMediaModal(true);
+
+    console.log("✅ 모달 상태 업데이트 완료!");
+    console.log("  - showMediaModal:", true);
+    console.log("  - selectedContent 설정됨");
+    console.log("================================");
   };
 
   const handleVoteButtonClick = (choice) => {
+    console.log("🗳️ 투표 버튼 클릭:", choice);
+
     if (hasVoted) {
       toast.error("이미 투표하셨습니다. 한 번만 투표할 수 있습니다.");
       return;
@@ -333,7 +322,10 @@ const BattleVSSection = ({
     return (
       <div className="space-y-4">
         <div
-          onClick={() => handleItemImageClick(item, choice)}
+          onClick={() => {
+            console.log(`🖱️ 썸네일 클릭! ${choice} (${platform})`);
+            handleItemImageClick(item, choice);
+          }}
           className={`group relative rounded-xl overflow-hidden transition-all cursor-pointer
             ${
               isSelected
@@ -518,12 +510,24 @@ const BattleVSSection = ({
     );
   };
 
+  // 모달 상태 로그
+  console.log("🎭 BattleVSSection 모달 상태:");
+  console.log("  - showMediaModal:", showMediaModal);
+  console.log("  - selectedContent:", selectedContent);
+
   return (
     <>
       {/* 미디어 재생 모달 */}
+      {console.log("🔄 MediaPlayerModal 렌더링 시도:", {
+        showMediaModal,
+        selectedContent: !!selectedContent,
+      })}
       <MediaPlayerModal
         isOpen={showMediaModal}
-        onClose={() => setShowMediaModal(false)}
+        onClose={() => {
+          console.log("🚪 모달 닫기 요청");
+          setShowMediaModal(false);
+        }}
         contentData={selectedContent}
       />
 
