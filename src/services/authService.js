@@ -21,64 +21,117 @@ import {
 import { auth, db } from "../firebase/config";
 
 /**
- * Google 계정으로 로그인하거나, 신규 사용자인 경우 자동으로 회원가입을 진행합니다.
+ * Google 로그인 처리 - 기존 사용자 확인 후 로그인 또는 회원가입 판단
  */
-export const loginOrRegisterWithGoogle = async () => {
+export const handleGoogleLogin = async () => {
   const provider = new GoogleAuthProvider();
+
   try {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
-    const userDocRef = doc(db, "users", user.uid);
+
+    // Firebase Auth에서 자동 로그아웃 (세션 관리를 위해)
+    await signOut(auth);
+
+    // Firestore에서 사용자 확인 (이메일 기반)
+    const userDocRef = doc(db, "users", user.email);
     const userDoc = await getDoc(userDocRef);
 
     if (userDoc.exists()) {
-      return { success: true, isNewUser: false, userData: userDoc.data() };
-    } else {
-      const citizenCode = `BS${Date.now().toString(36).toUpperCase()}`;
-      const userData = {
-        email: user.email,
-        username: user.displayName || user.email.split("@")[0],
-        profile: {
-          name: user.displayName || "",
-          citizenCode: citizenCode,
-          avatar: user.photoURL || null,
-          level: 1,
-          points: 100,
-          joinedAt: serverTimestamp(),
-          birthYear: "",
-          gender: "",
-          country: "",
+      // 기존 사용자 - 로그인 처리
+      const userData = userDoc.data();
+
+      // Google 정보 업데이트
+      await setDoc(
+        userDocRef,
+        {
+          ...userData,
+          googleId: user.uid,
+          lastLogin: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          profile: {
+            ...userData.profile,
+            avatar: user.photoURL || userData.profile?.avatar || null,
+          },
         },
-        googleId: user.uid,
-        stats: { totalVotes: 0, battlesCreated: 0, battlesWon: 0 },
-        preferences: { favoriteCategories: [], notifications: true },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        { merge: true }
+      );
+
+      // 세션에 사용자 정보 저장
+      sessionStorage.setItem(
+        "currentUser",
+        JSON.stringify({
+          uid: userData.uid || user.uid,
+          email: userData.email,
+          displayName: userData.username || user.displayName,
+          photoURL: user.photoURL,
+          provider: "google",
+          isLoggedIn: true,
+        })
+      );
+
+      return {
+        success: true,
+        isExistingUser: true,
+        userData: userData,
+        message: "로그인되었습니다!",
       };
-      await setDoc(userDocRef, userData);
-      return { success: true, isNewUser: true, userData };
+    } else {
+      // 신규 사용자 - 회원가입 필요
+      // Google 프로필 정보를 세션에 임시 저장
+      sessionStorage.setItem(
+        "googleProfile",
+        JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          emailVerified: user.emailVerified,
+        })
+      );
+
+      return {
+        success: true,
+        isExistingUser: false,
+        needsRegistration: true,
+        googleProfile: {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+        },
+        message: "회원가입이 필요합니다.",
+      };
     }
   } catch (error) {
+    console.error("Google login error:", error);
+
     if (error.code === "auth/popup-closed-by-user") {
-      return { success: false, error: "popup_closed" };
+      return {
+        success: false,
+        error: "popup_closed",
+        message: "로그인이 취소되었습니다.",
+      };
     }
+
     throw error;
   }
 };
 
 /**
- * Spotify 인증 후 받은 프로필 정보로 기존 사용자인지 확인하거나, 신규 가입이 필요한지 판단합니다.
- * @param {object} spotifyProfile - Spotify API로부터 받은 프로필 객체
+ * Spotify 로그인 처리 - 기존 사용자 확인 후 로그인 또는 회원가입 판단
  */
-export const handleSpotifyAuth = async (spotifyProfile) => {
+export const handleSpotifyLogin = async (spotifyProfile, accessToken) => {
   try {
-    // 이메일 기반으로 기존 사용자 확인 (users 컬렉션에서 이메일을 document ID로 사용)
+    // Firestore에서 사용자 확인 (이메일 기반)
     const userDocRef = doc(db, "users", spotifyProfile.email);
     const userDoc = await getDoc(userDocRef);
 
     if (userDoc.exists()) {
-      // 기존 사용자 - Spotify 정보 업데이트
+      // 기존 사용자 - 로그인 처리
       const userData = userDoc.data();
+
+      // Spotify 정보 업데이트
       await setDoc(
         userDocRef,
         {
@@ -98,21 +151,136 @@ export const handleSpotifyAuth = async (spotifyProfile) => {
         { merge: true }
       );
 
+      // 세션에 사용자 정보 저장
+      sessionStorage.setItem(
+        "currentUser",
+        JSON.stringify({
+          uid: userData.uid || spotifyProfile.id,
+          email: userData.email,
+          displayName: userData.username || spotifyProfile.display_name,
+          photoURL: spotifyProfile.images?.[0]?.url || userData.profile?.avatar,
+          provider: "spotify",
+          isLoggedIn: true,
+        })
+      );
+
+      // Spotify 임시 데이터 정리
+      sessionStorage.removeItem("spotifyProfile");
+      sessionStorage.removeItem("spotifyAccessToken");
+
       return {
         success: true,
-        needsRegistration: false,
-        userId: spotifyProfile.email,
+        isExistingUser: true,
         userData: userData,
+        message: "Spotify 로그인되었습니다!",
+      };
+    } else {
+      // 신규 사용자 - 회원가입 필요
+      // Spotify 프로필 정보를 세션에 저장 (이미 저장되어 있음)
+      return {
+        success: true,
+        isExistingUser: false,
+        needsRegistration: true,
+        spotifyProfile: spotifyProfile,
+        message: "회원가입이 필요합니다.",
       };
     }
+  } catch (error) {
+    console.error("Spotify login error:", error);
+    throw error;
+  }
+};
 
-    // 신규 사용자
+/**
+ * Google 프로필과 추가 입력 정보로 신규 회원을 가입시킵니다.
+ * @param {object} formData - 회원가입 폼에서 입력받은 데이터
+ */
+export const registerWithGoogle = async (formData) => {
+  try {
+    // 세션에서 Google 정보 가져오기
+    const googleProfile = JSON.parse(sessionStorage.getItem("googleProfile"));
+
+    if (!googleProfile) {
+      throw new Error("Google 인증 정보가 없습니다. 다시 로그인해주세요.");
+    }
+
+    console.log("Creating user document for:", googleProfile.email);
+
+    const citizenCode = `BS${Date.now().toString(36).toUpperCase()}`;
+
+    // 사용자 데이터 준비 (이메일을 document ID로 사용)
+    const userData = {
+      // 기본 정보
+      uid: googleProfile.uid,
+      email: googleProfile.email,
+      username:
+        formData.displayName ||
+        googleProfile.displayName ||
+        googleProfile.email.split("@")[0],
+
+      // 프로필 정보
+      profile: {
+        name: formData.displayName || googleProfile.displayName || "",
+        citizenCode: citizenCode,
+        avatar: googleProfile.photoURL || null,
+        level: 1,
+        points: 100,
+        joinedAt: serverTimestamp(),
+        birthYear: formData.birthYear || "",
+        gender: formData.gender || "",
+        country: formData.country || "",
+        bio: formData.bio || "",
+        location: formData.location || "",
+      },
+
+      // Google 관련 정보
+      provider: "google",
+      googleId: googleProfile.uid,
+      emailVerified: googleProfile.emailVerified || false,
+
+      // 시스템 정보
+      stats: { totalVotes: 0, battlesCreated: 0, battlesWon: 0 },
+      preferences: {
+        favoriteCategories: formData.favoriteCategories || [],
+        notifications: true,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastLogin: serverTimestamp(),
+      isActive: true,
+      hasPassword: true, // 이메일/비밀번호도 설정했으므로
+    };
+
+    // Firestore에 사용자 문서 생성 (이메일을 document ID로 사용)
+    const userDocRef = doc(db, "users", googleProfile.email);
+
+    console.log("Attempting to create user document...");
+    await setDoc(userDocRef, userData);
+    console.log("User document created successfully");
+
+    // 세션 정리
+    sessionStorage.removeItem("googleProfile");
+
+    // 로그인 상태로 사용자 정보 저장
+    sessionStorage.setItem(
+      "currentUser",
+      JSON.stringify({
+        uid: userData.uid,
+        email: userData.email,
+        displayName: userData.username,
+        photoURL: userData.profile.avatar,
+        provider: "google",
+        isLoggedIn: true,
+      })
+    );
+
     return {
-      success: false,
-      needsRegistration: true,
+      success: true,
+      user: userData,
+      citizenCode,
     };
   } catch (error) {
-    console.error("Spotify 인증 처리 오류:", error);
+    console.error("Google 회원가입 오류:", error);
     throw error;
   }
 };
@@ -183,7 +351,7 @@ export const registerWithSpotify = async (formData) => {
       updatedAt: serverTimestamp(),
       lastLogin: serverTimestamp(),
       isActive: true,
-      hasPassword: false, // Spotify 로그인 사용자는 비밀번호 없음
+      hasPassword: true, // 비밀번호도 설정했으므로
     };
 
     // Firestore에 사용자 문서 생성 (이메일을 document ID로 사용)
@@ -233,6 +401,7 @@ export const registerWithEmail = async (formData) => {
   );
   const citizenCode = `BS${Date.now().toString(36).toUpperCase()}`;
   const userData = {
+    uid: user.uid,
     email: user.email,
     username: user.email.split("@")[0],
     profile: {
@@ -246,15 +415,20 @@ export const registerWithEmail = async (formData) => {
       points: 100,
       joinedAt: serverTimestamp(),
     },
+    provider: "email",
     stats: { totalVotes: 0, battlesCreated: 0, battlesWon: 0 },
     preferences: { favoriteCategories: [], notifications: true },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    hasPassword: true,
   };
-  await setDoc(doc(db, "users", user.uid), userData);
+
+  // 이메일을 document ID로 사용하도록 변경
+  await setDoc(doc(db, "users", user.email), userData);
   await updateProfile(user, {
     displayName: user.email.split("@")[0],
   });
+
   return { success: true, user, citizenCode };
 };
 
@@ -265,13 +439,28 @@ export const registerWithEmail = async (formData) => {
  */
 export const loginWithEmail = async (email, password) => {
   const { user } = await signInWithEmailAndPassword(auth, email, password);
-  const userDoc = await getDoc(doc(db, "users", user.uid));
+
+  // 이메일 기반으로 사용자 문서 조회
+  const userDoc = await getDoc(doc(db, "users", email));
 
   if (userDoc.exists()) {
+    const userData = userDoc.data();
+
+    // 마지막 로그인 시간 업데이트
+    await setDoc(
+      doc(db, "users", email),
+      {
+        ...userData,
+        lastLogin: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
     return {
       success: true,
       user,
-      userData: userDoc.data(),
+      userData: userData,
     };
   } else {
     throw new Error("사용자 데이터베이스에서 정보를 찾을 수 없습니다.");
@@ -346,3 +535,7 @@ export const logout = async () => {
   sessionStorage.removeItem("currentUser");
   sessionStorage.removeItem("tempUserData");
 };
+
+// 기존 함수들 (하위 호환성을 위해 유지)
+export const loginOrRegisterWithGoogle = handleGoogleLogin;
+export const handleSpotifyAuth = handleSpotifyLogin;
