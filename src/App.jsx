@@ -12,20 +12,20 @@ import toast from "react-hot-toast";
 import Header from "./components/Header";
 import Login from "./components/Login";
 import Register from "./components/Register";
-import Callback from "./components/Callback";
+import Callback from "./components/SpotifyCallback";
 import MyPage from "./components/MyPage";
 import BattleList from "./components/BattleList";
 import BattleDetail from "./components/BattleDetail";
 import ContentUpload from "./components/ContentUpload";
-import FloatingButtons from "./components/FloatingButtons"; // ← 추가
+import FloatingButtons from "./components/FloatingButtons";
 
 import About from "./pages/About";
 import CultureMagazine from "./pages/CultureMagazine";
 import Entertainment from "./pages/Entertainment";
 import NotFound from "./pages/NotFound";
-import CreateBattlePage from "./pages/CreateBattlePage"; // 새로 만든 페이지 import
+import CreateBattlePage from "./pages/CreateBattlePage";
 
-import { logout, loginOrRegisterWithGoogle } from "./services/authService";
+import { logout, handleGoogleLogin } from "./services/authService";
 import { useAuth } from "./hooks/useAuth";
 
 function App() {
@@ -38,13 +38,17 @@ function App() {
 
 function MainApp() {
   const [showUpload, setShowUpload] = useState(false);
-  const { user, loading } = useAuth();
+  const { user, loading, refreshAuth } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
       await logout();
       toast.success("로그아웃 되었습니다.");
+      // 로그아웃 후 인증 상태 새로고침
+      if (refreshAuth) {
+        refreshAuth();
+      }
       navigate("/login");
     } catch (error) {
       console.error("Logout error:", error);
@@ -52,26 +56,91 @@ function MainApp() {
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLoginClick = async () => {
     try {
-      const result = await loginOrRegisterWithGoogle();
+      const result = await handleGoogleLogin();
+
       if (result.success) {
-        toast.success(
-          result.isNewUser
-            ? "환영합니다! 회원가입이 완료되었습니다."
-            : "로그인 되었습니다."
-        );
-        navigate("/");
+        if (result.isExistingUser) {
+          toast.success(result.message);
+          // 약간의 지연 후 상태 새로고침
+          setTimeout(() => {
+            if (refreshAuth) refreshAuth();
+          }, 500);
+          navigate("/");
+        } else {
+          toast.success(
+            "Google 계정 연동이 완료되었습니다. 추가 정보를 입력해주세요."
+          );
+          navigate("/register");
+        }
+      } else {
+        if (result.error === "popup_closed") {
+          toast.error("Google 로그인이 취소되었습니다.");
+        } else {
+          toast.error(
+            result.message || "Google 로그인 중 오류가 발생했습니다."
+          );
+        }
       }
     } catch (error) {
-      console.error("Google login process failed:", error);
+      console.error("Google login error:", error);
       toast.error("Google 로그인 중 오류가 발생했습니다.");
     }
   };
 
   const handleSpotifyLogin = () => {
-    console.log("Spotify login initiated");
-    toast("Spotify 로그인 기능은 현재 개발 중입니다.");
+    const CLIENT_ID = "254d6b7f190543e78da436cd3287a60e";
+    const isLocal =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+
+    const REDIRECT_URI = isLocal
+      ? "http://127.0.0.1:5173/callback" // 개발 환경일 때
+      : "https://cc-gamma-rosy.vercel.app/callback"; // 배포 환경일 때
+
+    const generateCodeVerifier = (length) => {
+      let text = "";
+      const possible =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+      for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+      }
+      return text;
+    };
+
+    const generateCodeChallenge = async (codeVerifier) => {
+      const data = new TextEncoder().encode(codeVerifier);
+      const digest = await window.crypto.subtle.digest("SHA-256", data);
+      return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    };
+
+    const initiateSpotifyLogin = async () => {
+      const codeVerifier = generateCodeVerifier(128);
+      const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+      sessionStorage.setItem("verifier", codeVerifier);
+
+      const scope = "user-read-private user-read-email";
+      const authUrl = new URL("https://accounts.spotify.com/authorize");
+      authUrl.searchParams.append("client_id", CLIENT_ID);
+      authUrl.searchParams.append("response_type", "code");
+      authUrl.searchParams.append("redirect_uri", REDIRECT_URI);
+      authUrl.searchParams.append("scope", scope);
+      authUrl.searchParams.append("code_challenge_method", "S256");
+      authUrl.searchParams.append("code_challenge", codeChallenge);
+
+      window.location.href = authUrl.toString();
+    };
+
+    initiateSpotifyLogin().catch((error) => {
+      console.error("Spotify login initiation error:", error);
+      toast.error("Spotify 로그인 시작 중 오류가 발생했습니다.");
+    });
   };
 
   if (loading) {
@@ -91,7 +160,6 @@ function MainApp() {
         onNavigate={navigate}
       />
 
-      {/* 헤더의 높이가 64px(h-16)이므로, 콘텐츠 영역이 헤더에 가려지지 않도록 패딩을 줍니다. */}
       <main className="pt-16">
         <Routes>
           <Route path="/" element={<BattleList />} />
@@ -99,7 +167,7 @@ function MainApp() {
             path="/login"
             element={
               <Login
-                onGoogleLogin={handleGoogleLogin}
+                onGoogleLogin={handleGoogleLoginClick}
                 onSpotifyLogin={handleSpotifyLogin}
               />
             }
@@ -107,7 +175,6 @@ function MainApp() {
           <Route path="/register" element={<Register />} />
           <Route path="/callback" element={<Callback />} />
 
-          {/* 로그인한 사용자만 접근 가능한 보호된 라우트들 */}
           <Route
             path="/mypage"
             element={user ? <MyPage /> : <Navigate to="/login" />}
@@ -125,13 +192,9 @@ function MainApp() {
         </Routes>
       </main>
 
-      {/* 콘텐츠 업로드 모달 */}
       {showUpload && <ContentUpload onClose={() => setShowUpload(false)} />}
-
-      {/* 🔥 플로팅 버튼들 - 모든 페이지에서 보임 */}
       <FloatingButtons />
 
-      {/* Toast 알림 */}
       <Toaster
         position="bottom-center"
         toastOptions={{
