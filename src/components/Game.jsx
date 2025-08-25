@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-// 파일 경로: src/components/Game.jsx - 모바일 최적화 버전
+// 파일 경로: src/components/Game.jsx - 모바일 최적화 버전 (정리완료)
 
-=======
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Play, Pause, RotateCcw, Music, Heart, Star, Zap } from "lucide-react";
 
@@ -19,13 +16,9 @@ const Game = ({ user }) => {
   const [musicKitLoading, setMusicKitLoading] = useState(true);
   const [musicKitError, setMusicKitError] = useState(null);
   const [userAuthorized, setUserAuthorized] = useState(false);
-<<<<<<< HEAD
   const [isMobile, setIsMobile] = useState(false);
   const [touchedLanes, setTouchedLanes] = useState(new Set());
 
-=======
-  const [touchedKeys, setTouchedKeys] = useState(new Set());
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
   const animationRef = useRef();
   const noteIdRef = useRef(0);
   const keysPressed = useRef(new Set());
@@ -41,18 +34,9 @@ const Game = ({ user }) => {
     laneWidth: 100,
   });
 
-<<<<<<< HEAD
   const LANES = 4;
   const NOTE_SPEED = 400;
-  const HIT_LINE_RATIO = 0.85; // 게임 높이의 85% 지점
-=======
-  const GAME_HEIGHT = 250;
-  const NOTE_HEIGHT = 40;
-  const NOTE_SPEED = 400;
-  const LANES = 4;
-  const LANE_WIDTH = 100;
-  const HIT_LINE_Y = GAME_HEIGHT - 50;
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
+  const HIT_LINE_RATIO = 0.85;
   const INTO_YOU_SONG_ID = "1522636431";
 
   const beatPattern = [
@@ -91,7 +75,6 @@ const Game = ({ user }) => {
         );
       setIsMobile(mobile);
 
-      // 화면 크기에 따른 게임 크기 조정
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
 
@@ -154,7 +137,6 @@ const Game = ({ user }) => {
             build: "1.0.0",
             icon: window.location.origin + "/favicon.ico",
           },
-          // 리디렉트 문제 해결을 위한 설정
           declarativeMarkup: true,
           suppressErrorDialog: true,
         });
@@ -165,13 +147,8 @@ const Game = ({ user }) => {
 
         music.addEventListener("authorizationStatusDidChange", (event) => {
           setUserAuthorized(music.isAuthorized);
-          // 인증 후 자동으로 게임 페이지로 돌아오도록 처리
-          if (music.isAuthorized && window.location.pathname === "/game") {
-            // 이미 게임 페이지에 있으므로 추가 처리 불필요
-          }
         });
 
-        // 음악 재생 상태 변화 감지
         music.addEventListener("playbackStateDidChange", (event) => {
           if (event.state === "completed" || event.state === "stopped") {
             setIsPlaying(false);
@@ -182,6 +159,7 @@ const Game = ({ user }) => {
 
         setMusicKitReady(true);
       } catch (error) {
+        console.error("MusicKit 초기화 실패:", error);
         setMusicKitError(error.message);
       } finally {
         setMusicKitLoading(false);
@@ -239,7 +217,7 @@ const Game = ({ user }) => {
     });
 
     animationRef.current = requestAnimationFrame(gameLoop);
-  }, [isPlaying, spawnNote, gameSize.height, gameSize.noteHeight]);
+  }, [isPlaying, spawnNote, gameSize.height, gameSize.noteHeight, HIT_LINE_Y]);
 
   const toggleGame = async () => {
     if (!musicKitReady || health <= 0) {
@@ -254,8 +232,7 @@ const Game = ({ user }) => {
     } else {
       try {
         if (!userAuthorized) {
-          // 모바일에서 팝업 차단 문제 해결
-          const authResult = await music.authorize();
+          await music.authorize();
           if (!music.isAuthorized) {
             alert("Apple Music 인증이 필요합니다.");
             return;
@@ -287,6 +264,7 @@ const Game = ({ user }) => {
     setLevel(1);
     notesSpawned.current.clear();
     setTouchedLanes(new Set());
+    keysPressed.current.clear();
   };
 
   const hitNote = useCallback(
@@ -312,15 +290,11 @@ const Game = ({ user }) => {
       }
       return false;
     },
-    [notes, combo]
+    [notes, combo, HIT_LINE_Y]
   );
 
-<<<<<<< HEAD
-  // 키보드 이벤트 (데스크톱용)
-=======
   const handleKeyPress = (lane, keyCode) => {
     if (!isPlaying) return;
-
     if (!keysPressed.current.has(keyCode)) {
       keysPressed.current.add(keyCode);
       if (!hitNote(lane)) {
@@ -334,23 +308,7 @@ const Game = ({ user }) => {
     keysPressed.current.delete(keyCode);
   };
 
-  const handleTouchStart = (lane, key) => {
-    const keyCode = `Key${key}`;
-    setTouchedKeys((prev) => new Set(prev).add(key));
-    handleKeyPress(lane, keyCode);
-  };
-
-  const handleTouchEnd = (key) => {
-    const keyCode = `Key${key}`;
-    setTouchedKeys((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(key);
-      return newSet;
-    });
-    handleKeyRelease(keyCode);
-  };
-
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
+  // 키보드 이벤트 (데스크톱용)
   useEffect(() => {
     if (isMobile) return;
 
@@ -371,7 +329,7 @@ const Game = ({ user }) => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [isPlaying, hitNote, isMobile]);
+  }, [isPlaying, isMobile]);
 
   // 터치 이벤트 핸들러 (모바일용)
   const handleTouchStart = (lane) => {
@@ -394,71 +352,16 @@ const Game = ({ user }) => {
   const isGameOver = health <= 0;
 
   return (
-<<<<<<< HEAD
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-pink-900 to-purple-800 flex flex-col items-center overflow-hidden">
-      {/* 모바일 viewport 설정을 위한 스타일 */}
-      <style jsx>{`
-        html,
-        body {
-          overflow-x: hidden;
-          width: 100%;
-          height: 100%;
-        }
-        * {
-          -webkit-tap-highlight-color: transparent;
-          -webkit-touch-callout: none;
-          -webkit-user-select: none;
-          user-select: none;
-        }
-      `}</style>
-=======
-    <div
-      className="fixed inset-0 bg-gradient-to-br from-purple-900 via-pink-900 to-purple-800 flex flex-col overflow-hidden"
-      style={{
-        margin: 0,
-        padding: 0,
-        width: "100vw",
-        height: "100vh",
-        minHeight: "100vh",
-        maxWidth: "100vw",
-        touchAction: "manipulation",
-        userSelect: "none",
-        WebkitUserSelect: "none",
-        WebkitTouchCallout: "none",
-        WebkitTapHighlightColor: "transparent",
-      }}
-    >
-      {/* 네비게이션 영역 */}
-      <div className="w-full bg-black/20 backdrop-blur-sm border-b border-pink-700/50 flex-shrink-0">
-        <div className="flex justify-between items-center px-3 py-5">
-          <div className="flex items-center gap-3">
-            <div className="text-white font-bold text-sm">🎵 Rhythm</div>
-            <nav className="flex gap-2">
-              <button className="text-gray-400 hover:text-gray-300 text-xs">
-                Default
-              </button>
-              <button className="text-pink-400 hover:text-pink-300 text-xs font-medium">
-                Apple
-              </button>
-              <button className="text-gray-400 hover:text-gray-300 text-xs">
-                Vivaldi
-              </button>
-            </nav>
-          </div>
-          <div className="text-gray-400 text-xs">♪</div>
-        </div>
-      </div>
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
-
+      {/* 사용자 정보 */}
       {user && (
-        <div className="absolute top-16 left-2 bg-black/50 p-2 rounded-lg text-white text-xs z-10">
+        <div className="absolute top-4 left-4 bg-black/50 p-2 rounded-lg text-white text-xs z-10">
           <p>
             플레이어: <strong>{user.displayName || user.email}</strong>
           </p>
         </div>
       )}
 
-<<<<<<< HEAD
       {/* 헤더 - 모바일 최적화 */}
       <div className="w-full max-w-6xl flex flex-col sm:flex-row justify-between items-center mb-4 px-2 pt-4">
         <div className="text-white text-center sm:text-left mb-2 sm:mb-0">
@@ -470,6 +373,8 @@ const Game = ({ user }) => {
             Apple Music과 함께 연주하세요!
           </p>
         </div>
+
+        {/* MusicKit 상태 표시 */}
         <div className="text-center sm:text-right">
           {musicKitLoading ? (
             <div className="text-yellow-400 text-xs sm:text-sm">
@@ -506,75 +411,11 @@ const Game = ({ user }) => {
         <div className="flex flex-wrap gap-3 sm:gap-6 justify-center sm:justify-start">
           <div className="text-center">
             <div className="text-lg sm:text-2xl font-bold text-yellow-400">
-=======
-      {/* 게임 정보 및 컨트롤 */}
-      <div className="w-full flex justify-between items-center px-3 py-2 flex-shrink-0">
-        <div className="text-white">
-          <h1 className="text-sm font-bold flex items-center gap-1">
-            <Music className="text-pink-400" size={12} />
-            Into You
-          </h1>
-          <p className="text-pink-200 text-xs">Apple Music과 함께</p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <button
-            onClick={resetGame}
-            className="flex items-center gap-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded text-xs font-medium"
-          >
-            <RotateCcw size={10} /> 리셋
-          </button>
-          <button
-            onClick={toggleGame}
-            disabled={!musicKitReady}
-            className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white rounded text-xs font-medium"
-          >
-            {isPlaying ? <Pause size={10} /> : <Play size={10} />}
-            {health <= 0 ? "다시" : isPlaying ? "정지" : "시작"}
-          </button>
-        </div>
-      </div>
-
-      {/* MusicKit 상태 */}
-      <div className="w-full px-3 py-1 flex-shrink-0">
-        {musicKitLoading ? (
-          <div className="text-yellow-400 text-xs">
-            🔄 Apple Music 로딩중...
-          </div>
-        ) : musicKitError ? (
-          <div className="text-red-400 text-xs">
-            ❌ MusicKit 오류: {musicKitError}
-          </div>
-        ) : musicKitReady ? (
-          <div className="flex justify-between items-center">
-            {!userAuthorized && (
-              <button
-                onClick={() => musicKitRef.current?.authorize()}
-                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs font-medium"
-              >
-                🔐 Apple Music 인증
-              </button>
-            )}
-            <p className="text-xs text-pink-200">
-              {userAuthorized ? "✅ 인증됨" : "🔒 인증 필요"}
-            </p>
-          </div>
-        ) : (
-          <div className="text-gray-400 text-xs">MusicKit 비활성화</div>
-        )}
-      </div>
-
-      {/* 스코어 및 상태 정보 */}
-      <div className="w-full flex justify-between items-center px-3 py-2 flex-shrink-0 text-white">
-        <div className="flex gap-3 items-center text-xs">
-          <div className="text-center">
-            <div className="text-xs font-bold text-yellow-400">
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
               {score.toLocaleString()}
             </div>
             <div className="text-xs text-gray-300">Score</div>
           </div>
           <div className="text-center">
-<<<<<<< HEAD
             <div className="text-lg sm:text-xl font-bold text-orange-400">
               {combo}
             </div>
@@ -597,24 +438,6 @@ const Game = ({ user }) => {
           <div className="text-center sm:text-right">
             <div className="text-xs text-gray-300">Health</div>
             <div className="w-20 sm:w-32 h-2 sm:h-3 bg-gray-700 rounded-full overflow-hidden">
-=======
-            <div className="text-xs font-bold text-orange-400">{combo}</div>
-            <div className="text-xs text-gray-300">Combo</div>
-          </div>
-          <div className="text-center">
-            <div className="text-xs font-bold text-blue-400">{maxCombo}</div>
-            <div className="text-xs text-gray-300">Max</div>
-          </div>
-          <div className="text-center">
-            <div className="text-xs font-bold text-green-400">Lv.{level}</div>
-            <div className="text-xs text-gray-300">Level</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="text-right">
-            <div className="text-xs text-gray-300">Health</div>
-            <div className="w-20 h-2 bg-gray-700 rounded-full overflow-hidden">
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
               <div
                 className={`h-full transition-all duration-300 ${
                   health > 60
@@ -627,11 +450,7 @@ const Game = ({ user }) => {
               />
             </div>
           </div>
-<<<<<<< HEAD
           <div className="text-sm sm:text-lg text-gray-300">
-=======
-          <div className="text-xs text-gray-300">
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
             {Math.floor(gameTime / 60)}:
             {(gameTime % 60).toFixed(0).padStart(2, "0")}
           </div>
@@ -639,34 +458,22 @@ const Game = ({ user }) => {
       </div>
 
       {/* 게임 영역 */}
-<<<<<<< HEAD
       <div className="relative flex flex-col items-center">
         <div
           ref={gameContainerRef}
           className="relative bg-black/30 backdrop-blur-sm border border-purple-500/30 rounded-xl overflow-hidden"
           style={{ width: gameSize.width, height: gameSize.height }}
-=======
-      <div className="flex-1 flex flex-col items-center justify-center w-full px-2">
-        <div
-          className="relative bg-black/30 backdrop-blur-sm border border-purple-500/30 rounded overflow-hidden mb-3"
-          style={{ width: LANES * LANE_WIDTH, height: GAME_HEIGHT }}
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
         >
           {/* 레인 */}
           {Array.from({ length: LANES }).map((_, index) => (
             <div
               key={index}
               className={`absolute border-r border-purple-400/30 ${
-<<<<<<< HEAD
                 (
                   isMobile
                     ? touchedLanes.has(index)
                     : keysPressed.current.has(Object.keys(keyMap)[index])
                 )
-=======
-                keysPressed.current.has(Object.keys(keyMap)[index]) ||
-                touchedKeys.has(keyArray[index])
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
                   ? "bg-white/20"
                   : "bg-transparent"
               } transition-colors duration-100`}
@@ -714,28 +521,30 @@ const Game = ({ user }) => {
           {/* 게임 오버 스크린 */}
           {isGameOver && (
             <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-20">
-<<<<<<< HEAD
               <div className="text-center text-white p-4">
-                <h2 className="text-2xl sm:text-4xl font-bold mb-4">
+                <h2 className="text-2xl sm:text-4xl font-bold mb-4 text-pink-300">
                   Game Over
                 </h2>
-                <p className="text-lg sm:text-xl mb-2">
-                  Final Score: {score.toLocaleString()}
-                </p>
-                <p className="text-base sm:text-lg mb-4">
-                  Max Combo: {maxCombo}
-                </p>
-=======
-              <div className="text-center text-white">
-                <h2 className="text-2xl font-bold mb-4">Game Over</h2>
-                <p className="text-lg mb-2">
-                  Final Score: {score.toLocaleString()}
-                </p>
-                <p className="text-sm mb-4">Max Combo: {maxCombo}</p>
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
+                <div className="space-y-2 text-sm sm:text-lg">
+                  <p>
+                    Final Score:{" "}
+                    <span className="font-bold text-yellow-400">
+                      {score.toLocaleString()}
+                    </span>
+                  </p>
+                  <p>
+                    Max Combo:{" "}
+                    <span className="font-bold text-orange-400">
+                      {maxCombo}
+                    </span>
+                  </p>
+                  <p className="text-xs sm:text-sm text-gray-400">
+                    Level {level} 달성
+                  </p>
+                </div>
                 <button
                   onClick={resetGame}
-                  className="px-4 py-2 sm:px-6 sm:py-3 bg-pink-500 hover:bg-pink-600 rounded-lg font-bold transition-colors text-sm sm:text-base"
+                  className="mt-4 px-4 py-2 sm:px-6 sm:py-3 bg-pink-500 hover:bg-pink-600 rounded-lg font-bold transition-colors text-sm sm:text-base"
                 >
                   다시 하기
                 </button>
@@ -745,12 +554,11 @@ const Game = ({ user }) => {
         </div>
 
         {/* 컨트롤 버튼 */}
-<<<<<<< HEAD
         <div className="flex justify-center mt-4 gap-1 sm:gap-2">
-          {["A", "S", "D", "F"].map((key, index) => (
-            <div
+          {keyArray.map((key, index) => (
+            <button
               key={key}
-              className={`w-12 h-12 sm:w-16 sm:h-16 border-2 rounded-lg flex items-center justify-center font-bold text-sm sm:text-lg ${
+              className={`w-12 h-12 sm:w-16 sm:h-16 border-2 rounded-lg flex items-center justify-center font-bold text-sm sm:text-lg select-none ${
                 (
                   isMobile
                     ? touchedLanes.has(index)
@@ -758,76 +566,39 @@ const Game = ({ user }) => {
                 )
                   ? "bg-white text-black border-white"
                   : "bg-black/30 text-white border-purple-400/50"
-              } ${isMobile ? "touch-manipulation" : ""}`}
-              {...(isMobile
-                ? {
-                    onTouchStart: (e) => {
-                      e.preventDefault();
-                      handleTouchStart(index);
-                    },
-                    onTouchEnd: (e) => {
-                      e.preventDefault();
-                      handleTouchEnd(index);
-                    },
-                  }
-                : {})}
-=======
-        <div className="flex justify-center gap-1 w-full px-2">
-          {keyArray.map((key, index) => (
-            <button
-              key={key}
+              } ${
+                isMobile ? "touch-manipulation active:scale-95" : ""
+              } transition-all duration-100`}
               onTouchStart={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleTouchStart(index, key);
+                if (isMobile) {
+                  e.preventDefault();
+                  handleTouchStart(index);
+                }
               }}
               onTouchEnd={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleTouchEnd(key);
+                if (isMobile) {
+                  e.preventDefault();
+                  handleTouchEnd(index);
+                }
               }}
               onTouchCancel={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleTouchEnd(key);
+                if (isMobile) {
+                  e.preventDefault();
+                  handleTouchEnd(index);
+                }
               }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                handleTouchStart(index, key);
-              }}
-              onMouseUp={(e) => {
-                e.preventDefault();
-                handleTouchEnd(key);
-              }}
-              onMouseLeave={(e) => {
-                e.preventDefault();
-                handleTouchEnd(key);
-              }}
-              className={`h-16 border-2 rounded-lg flex items-center justify-center font-bold text-xl select-none touch-manipulation ${
-                keysPressed.current.has(`Key${key}`) || touchedKeys.has(key)
-                  ? "bg-white text-black border-white"
-                  : "bg-black/30 text-white border-purple-400/50"
-              } active:scale-95 transition-all duration-100`}
               style={{
-                flex: "1 1 0",
-                minWidth: "70px",
-                minHeight: "64px",
-                touchAction: "manipulation",
+                touchAction: isMobile ? "manipulation" : "auto",
                 userSelect: "none",
                 WebkitUserSelect: "none",
                 WebkitTouchCallout: "none",
                 WebkitTapHighlightColor: "transparent",
-                cursor: "pointer",
-                padding: "8px",
-                margin: "0 2px",
               }}
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
             >
               {key}
             </button>
           ))}
         </div>
-<<<<<<< HEAD
         <p className="text-center text-pink-200 text-xs sm:text-sm mt-2 px-2">
           {isMobile
             ? "버튼을 터치하여 연주하세요!"
@@ -840,28 +611,28 @@ const Game = ({ user }) => {
         <button
           onClick={toggleGame}
           disabled={!musicKitReady}
-          className="flex items-center gap-2 px-4 py-3 sm:px-8 sm:py-4 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white rounded-lg font-bold text-sm sm:text-lg"
+          className="flex items-center gap-2 px-4 py-3 sm:px-8 sm:py-4 bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white rounded-lg font-bold text-sm sm:text-lg transition-all"
         >
           {isPlaying ? (
             <Pause size={isMobile ? 16 : 24} />
           ) : (
             <Play size={isMobile ? 16 : 24} />
           )}
-          {health <= 0 ? "다시 시작" : isPlaying ? "일시정지" : "게임 시작!"}
+          {!musicKitReady
+            ? "로딩 중..."
+            : health <= 0
+            ? "다시 시작"
+            : isPlaying
+            ? "일시정지"
+            : "게임 시작!"}
         </button>
         <button
           onClick={resetGame}
-          className="flex items-center gap-2 px-3 py-3 sm:px-6 sm:py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-bold text-sm sm:text-base"
+          className="flex items-center gap-2 px-3 py-3 sm:px-6 sm:py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-bold text-sm sm:text-base transition-colors"
         >
           <RotateCcw size={isMobile ? 14 : 20} /> 리셋
         </button>
       </div>
-=======
-        <p className="text-center text-pink-200 text-xs mt-2">
-          A, S, D, F 키를 사용하거나 버튼을 터치하여 연주하세요!
-        </p>
-      </div>
->>>>>>> bcaa1bb59e1dd2f2fdabff1b166a7b40aef75ab9
     </div>
   );
 };
