@@ -230,7 +230,7 @@ const ContentUpload = ({ onClose }) => {
           </div>
         </div>
 
-        {/* 디버깅 정보 (개발 중에만 표시) */}
+        {/* 디버깅 정보 (개발 중에만 표시) 
         {(process.env.NODE_ENV === "development" || true) && (
           <div className="p-4 bg-gray-800/50 border-t border-gray-700">
             <h4 className="text-sm font-medium text-gray-300 mb-2">
@@ -262,7 +262,7 @@ const ContentUpload = ({ onClose }) => {
               ))}
             </div>
           </div>
-        )}
+        )}*/}
       </div>
     </div>
   );

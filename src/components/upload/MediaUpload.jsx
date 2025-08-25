@@ -499,7 +499,7 @@ const MediaUpload = ({ post, updatePost }) => {
         </div>
       )}
 
-      {/* 디버깅 정보 */}
+      {/* 디버깅 정보
       <div className="mt-4 p-3 bg-gray-900/50 border border-gray-600 rounded text-xs">
         <p className="text-gray-400 font-mono">
           <strong>시간 입력 디버그:</strong>
@@ -512,7 +512,7 @@ const MediaUpload = ({ post, updatePost }) => {
           사용자 오버라이드: {post.userTimeOverride ? "YES" : "NO"}
           <br />
         </p>
-      </div>
+      </div>*/}
     </div>
   );
 };

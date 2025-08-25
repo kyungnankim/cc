@@ -1106,7 +1106,7 @@ const MediaPlayerModal = ({ isOpen, onClose, contentData }) => {
             </button>
           </div>
 
-          {/* 디버깅 정보 - 개발 환경에서만 표시 */}
+          {/* 디버깅 정보 - 개발 환경에서만 표시
           {process.env.NODE_ENV === "development" && (
             <div className="mt-6 p-3 bg-gray-900/50 border border-gray-600 rounded text-xs">
               <details className="text-gray-400 font-mono">
@@ -1229,7 +1229,7 @@ const MediaPlayerModal = ({ isOpen, onClose, contentData }) => {
                 </div>
               </details>
             </div>
-          )}
+          )} */}
         </div>
       </div>
     </div>
