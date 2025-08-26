@@ -1,6 +1,6 @@
-// src/services/contentService.js - YouTube 라이브 스트림 지원 완전 버전
+// src/services/contentService.js - YouTube 라이브 스트림 지원 및 인증 수정 완료 버전
 
-import { auth, db } from "../firebase/config";
+import { db } from "../firebase/config";
 import {
   collection,
   doc,
@@ -253,14 +253,19 @@ const uploadImage = async (imageFile) => {
 /**
  * 단일 콘텐츠 업로드 - 사용자 시간 설정 우선 적용
  */
-export const uploadContender = async (formData, imageFile) => {
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
+export const uploadContender = async (formData, imageFile, userInfo) => {
+  const currentUser = userInfo;
+  if (!currentUser || !currentUser.email) {
     throw new Error("로그인이 필요합니다.");
   }
 
   try {
-    console.log("🚀 콘텐츠 업로드 시작:", formData.title);
+    console.log(
+      "🚀 콘텐츠 업로드 시작:",
+      formData.title,
+      "by",
+      currentUser.email
+    );
 
     let imageUrl = null;
     let extractedData = null;
@@ -276,7 +281,7 @@ export const uploadContender = async (formData, imageFile) => {
       platform = "image";
       console.log("✅ 이미지 업로드 완료:", imageUrl);
     } else if (formData.contentType === "media" && formData.mediaUrl) {
-      // 미디어 URL 처리 (await 추가)
+      // 미디어 URL 처리
       console.log("🎬 미디어 URL 처리 중:", formData.mediaUrl);
       extractedData = await detectPlatformAndExtract(formData.mediaUrl);
       if (!extractedData) {
@@ -351,6 +356,7 @@ export const uploadContender = async (formData, imageFile) => {
 
     const contenderData = {
       creatorId: currentUser.uid,
+      creatorEmail: currentUser.email,
       creatorName:
         currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
       title: formData.title,
@@ -465,13 +471,18 @@ export const uploadContender = async (formData, imageFile) => {
 /**
  * 다중 콘텐츠 업로드 (수정됨)
  */
-export const uploadMultipleContenders = async (postsData, category) => {
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
-    throw new Error("로그인이 필요합니다.");
+export const uploadMultipleContenders = async (
+  postsData,
+  category,
+  userInfo
+) => {
+  if (!userInfo || !userInfo.email) {
+    throw new Error("인증 정보가 없어 다중 업로드를 진행할 수 없습니다.");
   }
 
-  console.log(`🚀 다중 콘텐츠 업로드 시작: ${postsData.length}개`);
+  console.log(
+    `🚀 다중 콘텐츠 업로드 시작: ${postsData.length}개, 요청자: ${userInfo.email}`
+  );
 
   const results = [];
   const errors = [];
@@ -494,7 +505,7 @@ export const uploadMultipleContenders = async (postsData, category) => {
         tags: post.tags || [],
       };
 
-      const result = await uploadContender(formData, post.imageFile);
+      const result = await uploadContender(formData, post.imageFile, userInfo);
 
       if (result.success) {
         results.push(result);
