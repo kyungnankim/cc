@@ -1,11 +1,13 @@
-// ContentUpload.jsx - 시간 필드 초기화 수정 버전
+// ContentUpload.jsx - 사용자 인증 문제 해결 버전
 import React, { useState } from "react";
 import { X, Plus, Loader2 } from "lucide-react";
 import CategorySelector from "./upload/CategorySelector";
 import PostList from "./upload/PostList";
 import { uploadMultipleContents } from "../services/uploadService";
+import { useAuth } from "../hooks/useAuth";
 
 const ContentUpload = ({ onClose }) => {
+  const { user, isAuthenticated } = useAuth();
   const [category, setCategory] = useState("music");
   const [isUploading, setIsUploading] = useState(false);
   const [posts, setPosts] = useState([
@@ -26,6 +28,30 @@ const ContentUpload = ({ onClose }) => {
       urlDetectedStartTime: 0, // URL에서 감지된 시간
     },
   ]);
+
+  // 현재 사용자 확인 함수
+  const getCurrentUserInfo = () => {
+    // useAuth 훅에서 사용자 정보 먼저 확인
+    if (user && isAuthenticated) {
+      return user;
+    }
+
+    // 세션 스토리지에서 직접 확인
+    try {
+      const sessionUser = sessionStorage.getItem("currentUser");
+      if (sessionUser) {
+        const userData = JSON.parse(sessionUser);
+        if (userData && userData.isLoggedIn && userData.email) {
+          console.log("📱 세션에서 사용자 확인:", userData.email);
+          return userData;
+        }
+      }
+    } catch (error) {
+      console.error("세션 사용자 정보 파싱 오류:", error);
+    }
+
+    return null;
+  };
 
   // 새 게시물 추가
   const addNewPost = () => {
@@ -123,6 +149,20 @@ const ContentUpload = ({ onClose }) => {
   // 폼 제출
   const handleSubmit = async () => {
     console.log("📝 폼 제출 시작...");
+
+    // 사용자 인증 상태 확인
+    const currentUser = getCurrentUserInfo();
+    if (!currentUser) {
+      alert("로그인이 필요합니다. 다시 로그인해주세요.");
+      console.error("❌ 사용자 인증 실패 - 로그인 정보 없음");
+      return;
+    }
+
+    console.log(
+      "✅ 사용자 인증 확인:",
+      currentUser.email,
+      currentUser.provider
+    );
     console.log("현재 게시물 상태:", posts);
 
     if (!validateForm()) {
@@ -132,7 +172,8 @@ const ContentUpload = ({ onClose }) => {
 
     setIsUploading(true);
     try {
-      const result = await uploadMultipleContents(posts, category);
+      // 사용자 정보를 명시적으로 전달
+      const result = await uploadMultipleContents(posts, category, currentUser);
 
       if (result.success) {
         alert(
@@ -154,11 +195,47 @@ const ContentUpload = ({ onClose }) => {
       }
     } catch (error) {
       console.error("❌ 전체 업로드 실패:", error);
-      alert("업로드에 실패했습니다: " + error.message);
+
+      // 인증 관련 오류인 경우 특별 처리
+      if (error.message.includes("로그인") || error.message.includes("인증")) {
+        alert("인증이 만료되었습니다. 다시 로그인해주세요.");
+        // 필요한 경우 로그인 페이지로 리다이렉트
+        window.location.href = "/login";
+      } else {
+        alert("업로드에 실패했습니다: " + error.message);
+      }
     } finally {
       setIsUploading(false);
     }
   };
+
+  // 로그인되지 않은 경우 메시지 표시
+  if (!getCurrentUserInfo()) {
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-gray-900 rounded-2xl max-w-md w-full p-6 border border-gray-800 text-center">
+          <h2 className="text-xl font-bold text-white mb-4">로그인 필요</h2>
+          <p className="text-gray-400 mb-6">
+            콘텐츠 업로드를 위해 로그인이 필요합니다.
+          </p>
+          <div className="flex gap-4">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3 bg-gray-700 text-white font-semibold rounded-lg hover:bg-gray-600 transition-colors"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => (window.location.href = "/login")}
+              className="flex-1 py-3 bg-pink-500 text-white font-semibold rounded-lg hover:bg-pink-600 transition-colors"
+            >
+              로그인하기
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -177,6 +254,11 @@ const ContentUpload = ({ onClose }) => {
           <p className="text-gray-400 mt-2">
             배틀에 사용할 콘텐츠를 등록하세요.
           </p>
+          {/* 현재 로그인된 사용자 표시 */}
+          <div className="mt-2 text-sm text-green-400">
+            로그인됨: {getCurrentUserInfo()?.email} (
+            {getCurrentUserInfo()?.provider})
+          </div>
         </div>
 
         <div className="p-6 space-y-6">
@@ -229,40 +311,6 @@ const ContentUpload = ({ onClose }) => {
             </button>
           </div>
         </div>
-
-        {/* 디버깅 정보 (개발 중에만 표시) 
-        {(process.env.NODE_ENV === "development" || true) && (
-          <div className="p-4 bg-gray-800/50 border-t border-gray-700">
-            <h4 className="text-sm font-medium text-gray-300 mb-2">
-              디버깅 정보
-            </h4>
-            <div className="text-xs text-gray-400 font-mono space-y-1">
-              <p>총 게시물: {posts.length}개</p>
-              <p>현재 카테고리: {category}</p>
-              {posts.map((post, index) => (
-                <div
-                  key={post.id}
-                  className="border-l-2 border-gray-600 pl-2 mt-2"
-                >
-                  <p>게시물 {index + 1}:</p>
-                  <p> - 제목: "{post.title || "미입력"}"</p>
-                  <p> - 타입: {post.contentType}</p>
-                  <p> - 플랫폼: {post.detectedPlatform || "none"}</p>
-                  <p>
-                    {" "}
-                    - 시작시간: "{post.startTime}" (type:{" "}
-                    {typeof post.startTime})
-                  </p>
-                  <p>
-                    {" "}
-                    - 종료시간: "{post.endTime}" (type: {typeof post.endTime})
-                  </p>
-                  <p> - URL: {post.mediaUrl || "미입력"}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}*/}
       </div>
     </div>
   );
