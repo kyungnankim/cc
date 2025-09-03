@@ -376,7 +376,7 @@ export const createBattleFromContendersForce = async (
 
 /**
  * 배틀 아이템 생성 (표준)
- */
+ 
 function createBattleItem(contender) {
   return {
     title: contender.title,
@@ -420,10 +420,144 @@ function createBattleItem(contender) {
     }),
   };
 }
+*/
+// src/services/matchingService.js
 
 /**
- * 배틀 아이템 생성 (유연한 버전)
+ * 배틀 아이템 생성 (표준)
  */
+// src/services/matchingService.js
+
+/**
+ * 배틀 아이템 생성 (표준)
+ */
+// src/services/matchingService.js
+
+/**
+ * 배틀 아이템 생성 (표준) - All Undefined Fields Handled
+ */
+// src/services/matchingService.js
+
+/**
+ * 배틀 아이템 생성 (표준) - contentItems 추가
+ */
+// src/services/matchingService.js
+
+/**
+ * 배틀 아이템 생성 (표준) - contentItems 추가
+ */
+// src/services/matchingService.js
+
+/**
+ * 배틀 아이템 생성 (표준) - contentItems 포함 최종 버전
+
+function createBattleItem(contender) {
+  return {
+    title: contender.title ?? "제목 없음",
+    // 대표 이미지
+    imageUrl:
+      contender.imageUrl ||
+      contender.thumbnailUrl ||
+      "/images/default-battle-image.png",
+    votes: 0,
+    contenderId: contender.id,
+    creatorId: contender.creatorId ?? null,
+    creatorName: contender.creatorName ?? "익명",
+    description: contender.description || "",
+    platform: contender.platform || "image",
+
+    // ✅ 핵심: 원본 contender의 모든 미디어 정보를 여기에 포함시킵니다.
+    contentItems: contender.contentItems || [],
+
+    // 안전을 위해 모든 옵셔널 필드에 null 처리
+    contentType: contender.contentType ?? "image",
+    extractedData: contender.extractedData ?? null,
+    timeSettings: contender.timeSettings ?? null,
+    youtubeUrl: contender.youtubeUrl ?? null,
+    youtubeId: contender.youtubeId ?? null,
+    thumbnailUrl: contender.thumbnailUrl ?? null,
+    instagramUrl: contender.instagramUrl ?? null,
+    postType: contender.postType ?? null,
+    tiktokUrl: contender.tiktokUrl ?? null,
+    tiktokId: contender.tiktokId ?? null,
+    tiktokHtml: contender.tiktokHtml ?? null,
+  };
+}
+ */
+// src/services/matchingService.js
+
+function createBattleItem(contender) {
+  return {
+    title: contender.title ?? "제목 없음",
+    imageUrl:
+      contender.imageUrl ||
+      contender.thumbnailUrl ||
+      "/images/default-battle-image.png",
+    votes: 0,
+    contenderId: contender.id,
+    creatorId: contender.creatorId ?? null,
+    creatorName: contender.creatorName ?? "익명",
+    description: contender.description || "",
+    platform: contender.platform || "image",
+
+    // ✅✅✅ 이 부분이 가장 중요합니다! ✅✅✅
+    // 원본 contender의 모든 미디어 정보를 여기에 포함시켜야 합니다.
+    contentItems: contender.contentItems || [],
+
+    // 안전을 위해 모든 옵셔널 필드에 null 처리
+    contentType: contender.contentType ?? "image",
+    extractedData: contender.extractedData ?? null,
+    timeSettings: contender.timeSettings ?? null,
+    youtubeUrl: contender.youtubeUrl ?? null,
+    youtubeId: contender.youtubeId ?? null,
+    thumbnailUrl: contender.thumbnailUrl ?? null,
+    instagramUrl: contender.instagramUrl ?? null,
+    postType: contender.postType ?? null,
+    tiktokUrl: contender.tiktokUrl ?? null,
+    tiktokId: contender.tiktokId ?? null,
+    tiktokHtml: contender.tiktokHtml ?? null,
+  };
+}
+// 참고: createBattleItemFlexible 함수도 동일하게 contentItems: contender.contentItems || [] 코드를 추가해주세요.
+
+// 참고: createBattleItemFlexible 함수도 동일하게 contentItems: contender.contentItems || [] 코드를 추가해주시면 좋습니다.
+
+// 참고: createBattleItemFlexible 함수도 동일하게 contentItems: contender.contentItems || [] 코드를 추가해주시면 좋습니다.
+
+/**
+ * 배틀 아이템 생성 (유연한 버전) - All Undefined Fields Handled
+ */
+function createBattleItemFlexible(contender) {
+  return {
+    title: contender.title ?? "제목 없음",
+    imageUrl:
+      contender.imageUrl ||
+      contender.thumbnailUrl ||
+      "/images/default-battle-image.png",
+    votes: 0,
+    contenderId: contender.id,
+    creatorId: contender.creatorId ?? null,
+    creatorName: contender.creatorName ?? "익명",
+    description: contender.description || "",
+    originalCategory: contender.category ?? null,
+
+    // 플랫폼 및 미디어 정보
+    platform: contender.platform || "image",
+    contentType: contender.contentType || "image",
+
+    // ✅ 모든 잠재적 undefined 필드에 '?? null'을 적용합니다.
+    extractedData: contender.extractedData ?? null,
+    timeSettings: contender.timeSettings ?? null,
+
+    // TikTok 관련 필드
+    tiktokHtml: contender.tiktokHtml ?? null,
+    tiktokBlockquote: contender.tiktokBlockquote ?? null,
+    embedType: contender.embedType ?? null,
+  };
+}
+/**
+ * 배틀 아이템 생성 (유연한 버전)
+ 
 function createBattleItemFlexible(contender) {
   return {
     title: contender.title,
@@ -447,11 +581,15 @@ function createBattleItemFlexible(contender) {
     }),
   };
 }
-
+*/
 // ==================== 스마트 매칭 시스템 ====================
 
 /**
  * 스마트 자동 매칭 실행 - 세션 기반 인증
+ */
+
+/**
+ * 스마트 자동 매칭 실행 - 디버깅 강화 버전
  */
 export const findAndCreateRandomBattle = async (options = {}) => {
   const {
@@ -460,7 +598,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
     allowCrossCategory = false,
   } = options;
 
-  // 사용자 인증 확인 (로깅 추가)
+  // 사용자 인증 확인
   const currentUser = getCurrentUser();
   console.log("🔐 매칭 시스템 사용자 확인:", {
     hasUser: !!currentUser,
@@ -475,13 +613,14 @@ export const findAndCreateRandomBattle = async (options = {}) => {
       const contendersQuery = query(
         collection(db, "contenders"),
         where("status", "==", "available"),
-        limit(maxMatches * 2)
+        limit(maxMatches * 3) // 더 많이 가져와서 매칭 가능성 높이기
       );
 
       const contendersSnapshot = await getDocs(contendersQuery);
       console.log("📊 조회된 contenders 수:", contendersSnapshot.size);
 
       if (contendersSnapshot.empty) {
+        console.log("❌ 사용 가능한 contenders 없음");
         return {
           success: false,
           reason: "insufficient_contenders",
@@ -495,7 +634,19 @@ export const findAndCreateRandomBattle = async (options = {}) => {
         ...doc.data(),
       }));
 
+      // 디버깅: 모든 contenders 정보 출력
+      console.log(
+        "🔍 사용 가능한 contenders:",
+        availableContenders.map((c) => ({
+          title: c.title,
+          category: c.category,
+          creatorId: c.creatorId?.slice(0, 8),
+          status: c.status,
+        }))
+      );
+
       if (availableContenders.length < 2) {
+        console.log("❌ 매칭 가능한 contenders 부족 (2개 미만)");
         return {
           success: false,
           reason: "insufficient_contenders",
@@ -507,6 +658,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
       let matchesCreated = 0;
       const matchingScores = [];
 
+      console.log("🎯 1단계: 카테고리 내 + 다른 크리에이터 매칭");
       // 1단계: 카테고리 내 + 다른 크리에이터 매칭
       matchesCreated += await tryMatchingWithinCategories(
         availableContenders,
@@ -515,6 +667,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
         false
       );
 
+      console.log("🎯 2단계: 같은 크리에이터 매칭 허용");
       // 2단계: 같은 크리에이터 매칭 허용
       if (matchesCreated < maxMatches && allowSameCreator) {
         matchesCreated += await tryMatchingWithinCategories(
@@ -525,6 +678,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
         );
       }
 
+      console.log("🎯 3단계: 카테고리 간 매칭 허용");
       // 3단계: 카테고리 간 매칭 허용
       if (matchesCreated < maxMatches && allowCrossCategory) {
         matchesCreated += await tryCrossCategoryMatching(
@@ -536,6 +690,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
       }
 
       if (matchesCreated === 0) {
+        console.log("❌ 최종적으로 생성된 매칭 없음");
         return {
           success: false,
           reason: "no_valid_matches",
@@ -544,6 +699,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
         };
       }
 
+      console.log(`🎉 매칭 완료: ${matchesCreated}개 배틀 생성`);
       return {
         success: true,
         matchesCreated,
@@ -551,6 +707,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
         message: `${matchesCreated}개의 배틀이 생성되었습니다.`,
       };
     } catch (error) {
+      console.error("❌ 매칭 시스템 내부 오류:", error);
       return {
         success: false,
         reason: "insufficient_contenders",
@@ -559,7 +716,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
       };
     }
   } catch (error) {
-    console.error("스마트 매칭 오류:", error);
+    console.error("❌ 스마트 매칭 전체 오류:", error);
     return {
       success: false,
       reason: "system_error",
@@ -573,6 +730,7 @@ export const findAndCreateRandomBattle = async (options = {}) => {
 /**
  * 카테고리 내 매칭 시도
  */
+
 async function tryMatchingWithinCategories(
   availableContenders,
   maxMatches,
@@ -581,10 +739,23 @@ async function tryMatchingWithinCategories(
 ) {
   let matchesCreated = 0;
 
+  console.log("🔍 tryMatchingWithinCategories 시작:", {
+    totalContenders: availableContenders.length,
+    maxMatches,
+    allowSameCreator,
+  });
+
   // 카테고리별 그룹화
   const categoryGroups = {};
   availableContenders.forEach((contender) => {
-    if (contender.status !== "available") return;
+    if (contender.status !== "available") {
+      console.log(
+        "⚠️ 사용할 수 없는 contender:",
+        contender.title,
+        contender.status
+      );
+      return;
+    }
 
     const category = contender.category || "general";
     if (!categoryGroups[category]) {
@@ -593,11 +764,33 @@ async function tryMatchingWithinCategories(
     categoryGroups[category].push(contender);
   });
 
+  console.log(
+    "📊 카테고리별 분포:",
+    Object.entries(categoryGroups)
+      .map(([cat, items]) => `${cat}: ${items.length}`)
+      .join(", ")
+  );
+
   // 각 카테고리에서 매칭 시도
   for (const [category, contenders] of Object.entries(categoryGroups)) {
-    if (contenders.length < 2 || matchesCreated >= maxMatches) continue;
+    console.log(
+      `🎯 카테고리 '${category}' 매칭 시도 (${contenders.length}개 contenders)`
+    );
+
+    if (contenders.length < 2) {
+      console.log(
+        `❌ 카테고리 '${category}': 매칭할 수 있는 contenders가 부족 (최소 2개 필요)`
+      );
+      continue;
+    }
+
+    if (matchesCreated >= maxMatches) {
+      console.log(`✋ 최대 매칭 수 (${maxMatches}) 도달`);
+      break;
+    }
 
     const shuffled = [...contenders].sort(() => Math.random() - 0.5);
+    console.log(`🔀 카테고리 '${category}' contenders 섞기 완료`);
 
     for (
       let i = 0;
@@ -607,23 +800,39 @@ async function tryMatchingWithinCategories(
       const contender1 = shuffled[i];
       const contender2 = shuffled[i + 1];
 
+      console.log(
+        `🤝 매칭 시도: "${contender1.title}" vs "${contender2.title}"`
+      );
+
+      // 상태 재확인
       if (
         contender1.status !== "available" ||
         contender2.status !== "available"
       ) {
+        console.log("❌ 상태 변경으로 매칭 불가:", {
+          contender1Status: contender1.status,
+          contender2Status: contender2.status,
+        });
         continue;
       }
 
       // 같은 크리에이터 체크
       if (!allowSameCreator && contender1.creatorId === contender2.creatorId) {
+        console.log("❌ 같은 크리에이터로 매칭 불가:", {
+          creatorId: contender1.creatorId,
+          allowSameCreator,
+        });
         continue;
       }
 
       try {
+        console.log("🚀 createBattleFromContenders 호출");
         const battleId = await createBattleFromContenders(
           contender1,
           contender2
         );
+
+        console.log("✅ 배틀 생성 성공:", battleId);
 
         const matchingScore = calculateMatchingScore(contender1, contender2);
 
@@ -636,17 +845,22 @@ async function tryMatchingWithinCategories(
           sameCreator: contender1.creatorId === contender2.creatorId,
         });
 
-        // 사용된 콘텐츠 표시
+        // 사용된 컨텐츠 표시
         contender1.status = "in_battle";
         contender2.status = "in_battle";
 
         matchesCreated++;
+        console.log(`🎉 매칭 완료! (${matchesCreated}/${maxMatches})`);
       } catch (error) {
-        console.error("배틀 생성 실패:", error.message);
+        console.error("❌ 배틀 생성 실패:", error.message);
+        console.error("상세 오류:", error);
       }
     }
   }
 
+  console.log(
+    `📈 tryMatchingWithinCategories 완료: ${matchesCreated}개 매칭 생성`
+  );
   return matchesCreated;
 }
 

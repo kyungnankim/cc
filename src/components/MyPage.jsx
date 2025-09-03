@@ -1,4 +1,3 @@
-// MyPage.jsx - 마이페이지 메인 컴포넌트 (수정된 버전)
 import React, { useState, useEffect } from "react";
 import {
   User,
@@ -10,6 +9,7 @@ import {
   Loader2,
   CreditCard,
   Crown,
+  List, // ✅ 1. 아이콘 추가
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { getUserStats } from "../services/userService.js";
@@ -18,13 +18,13 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase/config";
 import toast from "react-hot-toast";
 
-// 컴포넌트들 import - 확장자 추가
 import ProfileTab from "./mypage/ProfileTab.jsx";
 import BattlesTab from "./mypage/BattlesTab.jsx";
+import MyContentTab from "./mypage/MyContentTab.jsx"; // ✅ 2. 새로 만든 컴포넌트 import
 import VotesTab from "./mypage/VotesTab.jsx";
 import PointsTab from "./mypage/PointsTab.jsx";
 import SubscriptionTab from "./mypage/SubscriptionTab.jsx";
-import SettingsTab from "./mypage/SettingsTab.jsx"; // default export로 변경
+import SettingsTab from "./mypage/SettingsTab.jsx";
 import PaymentStatusHandler from "./PaymentStatusHandler.jsx";
 
 const MyPage = () => {
@@ -43,8 +43,6 @@ const MyPage = () => {
     if (user) {
       loadUserData();
     }
-
-    // URL 파라미터에서 탭 설정
     const urlParams = new URLSearchParams(window.location.search);
     const tab = urlParams.get("tab");
     if (tab) {
@@ -59,7 +57,6 @@ const MyPage = () => {
         getUserStats(user.uid),
         getUserSubscription(user.uid),
       ]);
-
       setStats(userStats);
       setSubscription(userSubscription);
     } catch (error) {
@@ -72,6 +69,7 @@ const MyPage = () => {
 
   const tabs = [
     { id: "profile", label: "프로필", icon: User },
+    { id: "my-content", label: "내 콘텐츠", icon: List }, // ✅ 3. "내 콘텐츠" 탭 추가
     { id: "battles", label: "내 배틀", icon: Trophy },
     { id: "votes", label: "투표 내역", icon: Heart },
     { id: "points", label: "포인트", icon: Award },
@@ -109,7 +107,6 @@ const MyPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      {/* 결제 상태 처리 */}
       <PaymentStatusHandler
         userId={user?.uid}
         onSubscriptionUpdate={loadUserData}
@@ -131,8 +128,6 @@ const MyPage = () => {
                   <User className="w-12 h-12 text-white" />
                 )}
               </div>
-
-              {/* 구독 배지 */}
               {subscription && subscription.id !== "free" && (
                 <div className="absolute -top-2 -right-2">
                   <div
@@ -147,7 +142,6 @@ const MyPage = () => {
                 </div>
               )}
             </div>
-
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-3xl font-bold">
@@ -163,9 +157,7 @@ const MyPage = () => {
                   />
                 )}
               </div>
-
               <p className="text-gray-400 mb-2">{user?.email}</p>
-
               {subscription && (
                 <div className="mb-4">
                   <span
@@ -181,7 +173,6 @@ const MyPage = () => {
                   </span>
                 </div>
               )}
-
               {loading ? (
                 <div className="flex gap-6">
                   {[1, 2, 3].map((i) => (
@@ -214,7 +205,6 @@ const MyPage = () => {
                 </div>
               )}
             </div>
-
             <div className="text-right">
               <div className="bg-gray-700/50 px-4 py-2 rounded-lg mb-2">
                 <p className="text-xs text-gray-400">시민권 번호</p>
@@ -260,6 +250,10 @@ const MyPage = () => {
         {/* 탭 콘텐츠 */}
         <div className="bg-gray-800/50 rounded-xl p-6">
           {activeTab === "profile" && <ProfileTab user={user} />}
+          {activeTab === "my-content" && (
+            <MyContentTab userId={user?.uid} />
+          )}{" "}
+          {/* ✅ 4. 탭 콘텐츠 렌더링 추가 */}
           {activeTab === "battles" && <BattlesTab userId={user?.uid} />}
           {activeTab === "votes" && <VotesTab userId={user?.uid} />}
           {activeTab === "points" && (

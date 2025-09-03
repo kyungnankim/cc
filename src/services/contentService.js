@@ -1,4 +1,5 @@
-// src/services/contentService.js - 최종 완전 버전 (YouTube 라이브 스트림 + TikTok 임베드 개선)
+// src/services/contentService.js - 완전 통합 버전
+// 다중 콘텐츠 타입 지원 + YouTube 라이브 스트림 + TikTok 임베드 개선 + 모든 유틸리티 함수
 
 import { auth, db } from "../firebase/config";
 import {
@@ -14,6 +15,8 @@ import {
   serverTimestamp,
   getDoc,
 } from "firebase/firestore";
+
+// ==================== 세션 및 사용자 관리 ====================
 
 // 세션에서 현재 사용자 가져오기 함수
 const getCurrentUser = () => {
@@ -96,6 +99,69 @@ const createTikTokBlockquote = (
   </blockquote>`;
 };
 
+// 이미지 업로드 함수
+const uploadImage = async (imageFile) => {
+  if (!imageFile) return null;
+
+  const formData = new FormData();
+  formData.append("file", imageFile);
+  formData.append(
+    "upload_preset",
+    import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+  );
+
+  try {
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${
+        import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
+      }/image/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+    const data = await response.json();
+    if (data.secure_url) {
+      return data.secure_url;
+    } else {
+      throw new Error(data.error?.message || "Cloudinary upload failed");
+    }
+  } catch (error) {
+    console.error("Image upload error:", error);
+    return null;
+  }
+};
+
+// 시간을 초로 변환 (mm:ss 또는 h:mm:ss 형식)
+export const parseTimeToSeconds = (timeStr) => {
+  if (!timeStr) return 0;
+
+  const parts = timeStr.split(":").reverse();
+  let seconds = 0;
+
+  if (parts[0]) seconds += parseInt(parts[0]) || 0; // 초
+  if (parts[1]) seconds += (parseInt(parts[1]) || 0) * 60; // 분
+  if (parts[2]) seconds += (parseInt(parts[2]) || 0) * 3600; // 시간
+
+  return seconds;
+};
+
+// 초를 시간 형식으로 변환
+export const secondsToTimeFormat = (seconds) => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s
+      .toString()
+      .padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
+// ==================== 플랫폼 감지 및 데이터 추출 ====================
+
 // URL에서 플랫폼 감지 및 데이터 추출 - 라이브 스트림 지원 + TikTok 임베드 개선
 export const detectPlatformAndExtract = async (url) => {
   if (!url) return null;
@@ -104,49 +170,136 @@ export const detectPlatformAndExtract = async (url) => {
     console.log("🔍 플랫폼 감지 시작:", url);
 
     // YouTube 감지 - 라이브 스트림, Shorts, 일반 영상 모두 지원
-    const youtubeRegex =
-      /(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|live\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})|youtube\.com\/live\/([a-zA-Z0-9_-]+)/;
+    const youtubeKeywords = new RegExp("youtu\\.?be|youtube|yt\\.be", "i");
+    const hasYouTubeKeywords = youtubeKeywords.test(url);
 
-    const youtubeMatch = url.match(youtubeRegex);
-    if (youtubeMatch) {
-      // 비디오 ID 추출 (일반 영상 또는 라이브)
-      const videoId = youtubeMatch[1] || youtubeMatch[2];
+    if (hasYouTubeKeywords) {
+      console.log("🎬 YouTube 관련 키워드 감지됨");
 
-      // URL 타입 감지
-      const isLive = url.includes("/live/");
-      const isShorts = url.includes("/shorts/");
+      let videoId = null;
+      let isLive = false;
+      let isShorts = false;
 
-      // URL에서 시작 시간 추출 (t 또는 start 파라미터) - 라이브에서는 보통 없음
-      const timeRegex = /[?&](?:t|start)=(\d+)/;
-      const timeMatch = url.match(timeRegex);
-      const urlStartTime = timeMatch ? parseInt(timeMatch[1]) : 0;
+      // 다양한 YouTube URL 패턴 시도
+      console.log("🔍 YouTube URL 패턴 분석 중...");
 
-      console.log("✅ YouTube 감지됨:", {
-        videoId,
-        urlStartTime,
-        type: isLive ? "live" : isShorts ? "shorts" : "video",
-        isLive,
-        isShorts,
-      });
+      // 1. 라이브 스트림 패턴: /live/VIDEO_ID
+      const livePattern = new RegExp(
+        "youtube\\.com\\/live\\/([a-zA-Z0-9_-]+)",
+        "i"
+      );
+      const liveMatch = url.match(livePattern);
+      if (liveMatch) {
+        videoId = liveMatch[1];
+        isLive = true;
+        console.log("✅ 라이브 스트림 감지:", videoId);
+      }
 
-      return {
-        platform: "youtube",
-        videoId,
-        originalUrl: url,
-        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-        embedUrl: `https://www.youtube.com/embed/${videoId}`,
-        startTime: urlStartTime, // URL에서 감지된 시간 (참고용)
-        urlDetectedTime: urlStartTime, // 명시적으로 URL 감지 시간임을 표시
-        contentType: isLive ? "live" : isShorts ? "shorts" : "video",
-        isLive: isLive,
-        isShorts: isShorts,
-      };
+      // 2. 일반 watch 패턴: ?v=VIDEO_ID 또는 &v=VIDEO_ID
+      if (!videoId) {
+        const watchPattern = new RegExp("[?&]v=([a-zA-Z0-9_-]+)", "i");
+        const watchMatch = url.match(watchPattern);
+        if (watchMatch) {
+          videoId = watchMatch[1];
+          console.log("✅ 일반 영상 감지:", videoId);
+        }
+      }
+
+      // 3. youtu.be 단축 링크: youtu.be/VIDEO_ID
+      if (!videoId) {
+        const shortPattern = new RegExp("youtu\\.be\\/([a-zA-Z0-9_-]+)", "i");
+        const shortMatch = url.match(shortPattern);
+        if (shortMatch) {
+          videoId = shortMatch[1];
+          console.log("✅ 단축 링크 감지:", videoId);
+        }
+      }
+
+      // 4. Shorts 패턴: /shorts/VIDEO_ID
+      if (!videoId) {
+        const shortsPattern = new RegExp(
+          "youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]+)",
+          "i"
+        );
+        const shortsMatch = url.match(shortsPattern);
+        if (shortsMatch) {
+          videoId = shortsMatch[1];
+          isShorts = true;
+          console.log("✅ Shorts 감지:", videoId);
+        }
+      }
+
+      // 5. 임베드 패턴: /embed/VIDEO_ID
+      if (!videoId) {
+        const embedPattern = new RegExp(
+          "youtube\\.com\\/embed\\/([a-zA-Z0-9_-]+)",
+          "i"
+        );
+        const embedMatch = url.match(embedPattern);
+        if (embedMatch) {
+          videoId = embedMatch[1];
+          console.log("✅ 임베드 링크 감지:", videoId);
+        }
+      }
+
+      // 비디오 ID 후처리 (쿼리 파라미터 제거)
+      if (videoId) {
+        // ?나 &로 시작하는 추가 파라미터 제거
+        if (videoId.includes("?")) {
+          videoId = videoId.split("?")[0];
+        }
+        if (videoId.includes("&")) {
+          videoId = videoId.split("&")[0];
+        }
+
+        console.log("🎯 최종 비디오 ID:", videoId);
+
+        // 비디오 ID 유효성 검사 (YouTube ID는 보통 11자리)
+        if (videoId.length < 8) {
+          console.log("❌ 비디오 ID가 너무 짧음:", videoId);
+          return {
+            platform: "youtube_invalid",
+            error: "YouTube 비디오 ID가 올바르지 않습니다.",
+            suggestion: "올바른 YouTube URL을 입력해주세요.",
+            detectedKeywords: true,
+          };
+        }
+
+        // URL에서 시작 시간 추출
+        const timePattern = new RegExp("[?&](?:t|start)=(\\d+)", "i");
+        const timeMatch = url.match(timePattern);
+        const startTime = timeMatch ? parseInt(timeMatch[1]) : 0;
+
+        console.log("✅ YouTube 감지 완료:", {
+          videoId,
+          startTime,
+          type: isLive ? "live" : isShorts ? "shorts" : "video",
+          originalUrl: url,
+          isLive,
+          isShorts,
+        });
+
+        return {
+          platform: "youtube",
+          videoId,
+          originalUrl: url,
+          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          embedUrl: `https://www.youtube.com/embed/${videoId}`,
+          startTime: startTime,
+          urlDetectedTime: startTime,
+          contentType: isLive ? "live" : isShorts ? "shorts" : "video",
+          isLive: isLive,
+          isShorts: isShorts,
+        };
+      }
     }
 
     // TikTok 감지 및 처리 (개선된 버전)
-    const tiktokRegex =
-      /(?:(?:https?:\/\/)?(?:www\.|vm\.|m\.)?tiktok\.com\/(?:@[\w.-]+\/video\/(\d+)|t\/(\w+)|v\/(\d+))|(?:https?:\/\/)?vm\.tiktok\.com\/(\w+))/i;
-    const tiktokMatch = url.match(tiktokRegex);
+    const tiktokPattern = new RegExp(
+      "(?:(?:https?:\\/\\/)?(?:www\\.|vm\\.|m\\.)?tiktok\\.com\\/(?:@[\\w.-]+\\/video\\/(\\d+)|t\\/(\\w+)|v\\/(\\d+))|(?:https?:\\/\\/)?vm\\.tiktok\\.com\\/(\\w+))",
+      "i"
+    );
+    const tiktokMatch = url.match(tiktokPattern);
 
     if (tiktokMatch) {
       console.log("🎵 TikTok URL 감지됨");
@@ -266,8 +419,11 @@ export const detectPlatformAndExtract = async (url) => {
     }
 
     // Instagram 감지
-    const instagramRegex = /instagram\.com\/(p|reel|tv)\/([A-Za-z0-9_-]+)/;
-    const instagramMatch = url.match(instagramRegex);
+    const instagramPattern = new RegExp(
+      "instagram\\.com\\/(p|reel|tv)\\/([A-Za-z0-9_-]+)",
+      "i"
+    );
+    const instagramMatch = url.match(instagramPattern);
     if (instagramMatch) {
       const postId = instagramMatch[2];
       const postType = instagramMatch[1];
@@ -291,125 +447,77 @@ export const detectPlatformAndExtract = async (url) => {
   }
 };
 
-// 시간을 초로 변환 (mm:ss 또는 h:mm:ss 형식)
-export const parseTimeToSeconds = (timeStr) => {
-  if (!timeStr) return 0;
-
-  const parts = timeStr.split(":").reverse();
-  let seconds = 0;
-
-  if (parts[0]) seconds += parseInt(parts[0]) || 0; // 초
-  if (parts[1]) seconds += (parseInt(parts[1]) || 0) * 60; // 분
-  if (parts[2]) seconds += (parseInt(parts[2]) || 0) * 3600; // 시간
-
-  return seconds;
-};
-
-// 초를 시간 형식으로 변환
-export const secondsToTimeFormat = (seconds) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, "0")}:${s
-      .toString()
-      .padStart(2, "0")}`;
-  }
-  return `${m}:${s.toString().padStart(2, "0")}`;
-};
-
-// 이미지 업로드 함수
-const uploadImage = async (imageFile) => {
-  if (!imageFile) return null;
-
-  const formData = new FormData();
-  formData.append("file", imageFile);
-  formData.append(
-    "upload_preset",
-    import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
-  );
-
-  try {
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${
-        import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-      }/image/upload`,
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
-    const data = await response.json();
-    if (data.secure_url) {
-      return data.secure_url;
-    } else {
-      throw new Error(data.error?.message || "Cloudinary upload failed");
-    }
-  } catch (error) {
-    console.error("Image upload error:", error);
-    return null;
-  }
-};
-
 // ==================== 메인 콘텐츠 서비스 함수들 ====================
 
 /**
- * 단일 콘텐츠 업로드 - 라이브 스트림 지원 + TikTok 임베드 개선 버전
- */
-export const uploadContender = async (formData, imageFile) => {
+ * 다중 콘텐츠를 지원하는 통합 업로드 함수
+ * postData에서 imageFile과 mediaUrl을 모두 처리할 수 있음
+
+export const uploadContender = async (postData) => {
   const currentUser = getCurrentUser();
   if (!currentUser) {
     throw new Error("로그인이 필요합니다.");
   }
 
   try {
-    console.log("🚀 콘텐츠 업로드 시작:", formData.title);
+    console.log("🚀 콘텐츠 업로드 시작:", postData.title);
+
+    // 이미지와 미디어 URL 중 최소 하나는 있어야 함
+    const hasImage = postData.imageFile;
+    const hasMedia = postData.mediaUrl && postData.mediaUrl.trim();
+
+    if (!hasImage && !hasMedia) {
+      throw new Error("이미지 또는 외부 링크 중 최소 하나를 추가해주세요.");
+    }
 
     let imageUrl = null;
     let extractedData = null;
-    let platform = "image";
+    let platforms = [];
 
-    if (formData.contentType === "image" && imageFile) {
-      // 이미지 업로드
+    // 이미지 처리
+    if (hasImage) {
       console.log("📸 이미지 업로드 중...");
-      imageUrl = await uploadImage(imageFile);
+      imageUrl = await uploadImage(postData.imageFile);
       if (!imageUrl) {
         throw new Error("이미지 업로드에 실패했습니다.");
       }
-      platform = "image";
+      platforms.push("image");
       console.log("✅ 이미지 업로드 완료:", imageUrl);
-    } else if (formData.contentType === "media" && formData.mediaUrl) {
-      // 미디어 URL 처리 (await 추가)
-      console.log("🎬 미디어 URL 처리 중:", formData.mediaUrl);
-      extractedData = await detectPlatformAndExtract(formData.mediaUrl);
+    }
+
+    // 미디어 URL 처리
+    if (hasMedia) {
+      console.log("🎬 미디어 URL 처리 중:", postData.mediaUrl);
+      extractedData = await detectPlatformAndExtract(postData.mediaUrl);
       if (!extractedData) {
         throw new Error("지원하지 않는 미디어 URL입니다.");
       }
+      platforms.push(extractedData.platform);
+      console.log("✅ 플랫폼 감지 완료:", extractedData.platform);
 
-      platform = extractedData.platform;
-      console.log("✅ 플랫폼 감지 완료:", platform);
-
-      // 플랫폼별 기본 이미지 설정
-      if (platform === "youtube") {
-        imageUrl = extractedData.thumbnailUrl || "/images/popo.png";
-      } else if (platform === "tiktok") {
-        // TikTok은 썸네일 URL이 없으므로 기본 이미지 사용
-        imageUrl =
-          extractedData.thumbnailUrl || "/images/tiktok-placeholder.png";
-      } else {
-        imageUrl = "/images/popo.png";
+      // 플랫폼별 기본 이미지 설정 (이미지가 없는 경우)
+      if (!imageUrl) {
+        if (extractedData.platform === "youtube") {
+          imageUrl = extractedData.thumbnailUrl || "/images/popo.png";
+        } else if (extractedData.platform === "tiktok") {
+          imageUrl =
+            extractedData.thumbnailUrl || "/images/tiktok-placeholder.png";
+        } else {
+          imageUrl = "/images/popo.png";
+        }
       }
-    } else {
-      throw new Error("콘텐츠 정보가 올바르지 않습니다.");
+    }
+
+    // 기본 이미지가 없는 경우
+    if (!imageUrl) {
+      imageUrl = "/images/popo.png";
     }
 
     // 사용자 시간 설정 우선 처리 (YouTube만)
     let timeSettings = null;
-
-    if (platform === "youtube") {
-      const userStartTime = parseTimeToSeconds(formData.startTime);
-      const userEndTime = parseTimeToSeconds(formData.endTime);
+    if (extractedData && extractedData.platform === "youtube") {
+      const userStartTime = parseTimeToSeconds(postData.startTime);
+      const userEndTime = parseTimeToSeconds(postData.endTime);
       const urlStartTime =
         extractedData?.urlDetectedTime || extractedData?.startTime || 0;
 
@@ -417,22 +525,22 @@ export const uploadContender = async (formData, imageFile) => {
         userStart: userStartTime,
         userEnd: userEndTime,
         urlStart: urlStartTime,
-        userStartInput: formData.startTime,
-        userEndInput: formData.endTime,
+        userStartInput: postData.startTime,
+        userEndInput: postData.endTime,
         isLive: extractedData?.isLive,
         contentType: extractedData?.contentType,
       });
 
       // 사용자가 시간을 설정했는지 확인
-      const hasUserTimeSettings = formData.startTime || formData.endTime;
+      const hasUserTimeSettings = postData.startTime || postData.endTime;
 
       if (hasUserTimeSettings) {
         // 사용자 설정이 있으면 사용자 설정 우선
         timeSettings = {
           startTime: userStartTime,
           endTime: userEndTime,
-          startTimeDisplay: formData.startTime || "",
-          endTimeDisplay: formData.endTime || "",
+          startTimeDisplay: postData.startTime || "",
+          endTimeDisplay: postData.endTime || "",
           source: "user", // 사용자 설정임을 명시
           urlDetectedTime: urlStartTime, // 참고용으로 URL 시간 저장
         };
@@ -457,29 +565,40 @@ export const uploadContender = async (formData, imageFile) => {
       }
     }
 
+    // 주요 플랫폼 결정 (첫 번째 플랫폼 사용)
+    const primaryPlatform = platforms[0] || "mixed";
+
     const contenderData = {
       creatorId: currentUser.uid,
       creatorName:
         currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
-      title: formData.title,
-      description: formData.description || "",
+      title: postData.title,
+      description: postData.description || "",
       imageUrl: imageUrl,
-      category: formData.category,
+      category: postData.category,
       status: "available",
       createdAt: serverTimestamp(),
 
-      // 플랫폼 및 미디어 정보
-      platform: platform,
-      contentType: formData.contentType || "image",
+      // 다중 플랫폼 정보
+      platform: primaryPlatform,
+      platforms: platforms, // 모든 플랫폼 목록
+      contentTypes: platforms, // 각 콘텐츠 타입들
 
-      // 추출된 미디어 데이터
-      ...(extractedData && {
+      // 이미지 정보
+      ...(hasImage && {
+        hasImage: true,
+        originalImageFile: postData.imageFile?.name,
+      }),
+
+      // 미디어 정보
+      ...(hasMedia && {
+        hasMedia: true,
+        mediaUrl: postData.mediaUrl,
         extractedData: extractedData,
-        mediaUrl: formData.mediaUrl,
       }),
 
       // YouTube 특별 처리 (호환성)
-      ...(platform === "youtube" && {
+      ...(extractedData?.platform === "youtube" && {
         youtubeUrl: extractedData.originalUrl,
         youtubeId: extractedData.videoId,
         thumbnailUrl: extractedData.thumbnailUrl,
@@ -496,7 +615,7 @@ export const uploadContender = async (formData, imageFile) => {
       }),
 
       // TikTok 특별 처리 (개선된 버전)
-      ...(platform === "tiktok" && {
+      ...(extractedData?.platform === "tiktok" && {
         tiktokUrl: extractedData.originalUrl,
         tiktokId: extractedData.videoId,
         tiktokUsername: extractedData.username,
@@ -513,8 +632,8 @@ export const uploadContender = async (formData, imageFile) => {
         embedType: extractedData.embedType || "custom",
       }),
 
-      // Instagram 특별 처리 (호환성)
-      ...(platform === "instagram" && {
+      // Instagram 특별 처리
+      ...(extractedData?.platform === "instagram" && {
         instagramUrl: extractedData.originalUrl,
         postType: extractedData.postType,
       }),
@@ -526,7 +645,7 @@ export const uploadContender = async (formData, imageFile) => {
 
       likeCount: 0,
       viewCount: 0,
-      tags: formData.tags || [],
+      tags: postData.tags || [],
       battleCount: 0,
       updatedAt: serverTimestamp(),
       isActive: true,
@@ -539,7 +658,7 @@ export const uploadContender = async (formData, imageFile) => {
     console.log("✅ Firestore 저장 완료! 문서 ID:", docRef.id);
 
     // 플랫폼별 특별 로그
-    if (platform === "tiktok") {
+    if (extractedData?.platform === "tiktok") {
       console.log("🎵 TikTok 콘텐츠 업로드 완료:");
       console.log("  - 비디오 ID:", extractedData.videoId);
       console.log("  - 사용자명:", extractedData.username);
@@ -571,10 +690,138 @@ export const uploadContender = async (formData, imageFile) => {
       success: true,
       contenderId: docRef.id,
       imageUrl: imageUrl,
-      platform: platform,
-      contentType: formData.contentType,
+      platforms: platforms,
+      primaryPlatform: primaryPlatform,
       extractedData: extractedData,
       timeSettings: timeSettings,
+    };
+  } catch (error) {
+    console.error("❌ Contender upload error:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+ */
+export const uploadContender = async (postData) => {
+  const currentUser = getCurrentUser();
+  if (!currentUser) throw new Error("로그인이 필요합니다.");
+  if (!postData.contentItems || postData.contentItems.length === 0) {
+    throw new Error("최소 하나 이상의 콘텐츠를 추가해주세요.");
+  }
+
+  try {
+    console.log("🚀 다중 콘텐츠 업로드 시작:", postData.title);
+
+    // 1. contentItems 배열을 순회하며 비동기 처리 준비 (이미지 업로드 등)
+    const processedContentItemsPromises = postData.contentItems.map(
+      async (item) => {
+        if (item.type === "image" && item.imageFile) {
+          console.log(`📸 '${item.imageFile.name}' 이미지 업로드 중...`);
+          const imageUrl = await uploadImage(item.imageFile);
+          if (!imageUrl) {
+            throw new Error(`'${item.imageFile.name}' 이미지 업로드 실패`);
+          }
+          return {
+            type: "image",
+            platform: "image",
+            imageUrl: imageUrl,
+            thumbnailUrl: imageUrl, // 이미지 자체를 썸네일로 사용
+          };
+        } else if (item.type === "media" && item.mediaUrl) {
+          console.log(`🎬 '${item.mediaUrl}' 미디어 처리 중...`);
+          const extractedData = await detectPlatformAndExtract(item.mediaUrl);
+          if (!extractedData) {
+            throw new Error(`지원하지 않는 미디어 URL입니다: ${item.mediaUrl}`);
+          }
+
+          let timeSettings = null;
+          if (extractedData.platform === "youtube") {
+            const userStartTime = parseTimeToSeconds(item.startTime);
+            const userEndTime = parseTimeToSeconds(item.endTime);
+            const urlStartTime =
+              extractedData.urlDetectedTime || extractedData.startTime || 0;
+
+            if (item.startTime || item.endTime) {
+              timeSettings = {
+                startTime: userStartTime,
+                endTime: userEndTime,
+                source: "user",
+              };
+            } else if (urlStartTime > 0 && !extractedData.isLive) {
+              timeSettings = {
+                startTime: urlStartTime,
+                endTime: 0,
+                source: "url",
+              };
+            }
+          }
+
+          return {
+            type: "media",
+            platform: extractedData.platform,
+            mediaUrl: item.mediaUrl,
+            thumbnailUrl:
+              extractedData.thumbnailUrl || "/images/default-thumbnail.png",
+            extractedData: extractedData,
+            ...(timeSettings && { timeSettings }),
+          };
+        }
+        return null; // 유효하지 않은 아이템은 null 반환
+      }
+    );
+
+    // 2. 모든 비동기 작업(이미지 업로드 등)을 병렬로 실행
+    const processedContentItems = (
+      await Promise.all(processedContentItemsPromises)
+    ).filter(Boolean);
+
+    if (processedContentItems.length === 0) {
+      throw new Error("처리할 유효한 콘텐츠가 없습니다.");
+    }
+    console.log("✅ 모든 콘텐츠 처리 완료:", processedContentItems);
+
+    // 3. 대표 썸네일 결정 (첫 번째 아이템의 썸네일을 사용)
+    const representativeThumbnail =
+      processedContentItems[0].thumbnailUrl || "/images/popo.png";
+    const platforms = [
+      ...new Set(processedContentItems.map((item) => item.platform)),
+    ];
+
+    // 4. Firestore에 저장할 최종 데이터 구조화
+    const contenderData = {
+      creatorId: currentUser.uid,
+      creatorName:
+        currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
+      title: postData.title,
+      description: postData.description || "",
+      category: postData.category,
+      tags: postData.tags || [],
+
+      thumbnailUrl: representativeThumbnail, // 리스트 표시에 사용할 대표 썸네일
+      platform: platforms[0] || "mixed", // 대표 플랫폼
+      platforms: platforms, // 포함된 모든 플랫폼 목록
+
+      // 핵심: 처리 완료된 모든 콘텐츠 아이템 배열 저장
+      contentItems: processedContentItems,
+
+      status: "available",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      likeCount: 0,
+      viewCount: 0,
+      battleCount: 0,
+      isActive: true,
+    };
+
+    console.log("💾 Firestore 저장 데이터:", contenderData);
+    const docRef = await addDoc(collection(db, "contenders"), contenderData);
+    console.log("✅ Firestore 저장 완료! 문서 ID:", docRef.id);
+
+    return {
+      success: true,
+      contenderId: docRef.id,
     };
   } catch (error) {
     console.error("❌ Contender upload error:", error);
@@ -606,18 +853,18 @@ export const uploadMultipleContenders = async (postsData, category) => {
         `📤 게시물 ${i + 1}/${postsData.length} 처리 중: ${post.title}`
       );
 
-      const formData = {
+      const postData = {
         title: post.title,
         description: post.description,
         category: category,
-        contentType: post.contentType,
         mediaUrl: post.mediaUrl,
         startTime: post.startTime,
         endTime: post.endTime,
         tags: post.tags || [],
+        imageFile: post.imageFile,
       };
 
-      const result = await uploadContender(formData, post.imageFile);
+      const result = await uploadContender(postData);
 
       if (result.success) {
         results.push(result);
@@ -653,48 +900,36 @@ export const uploadMultipleContenders = async (postsData, category) => {
   };
 };
 
+// ==================== 콘텐츠 조회 함수들 ====================
+
 /**
  * 사용자 콘텐츠 조회
  */
-export const getUserContenders = async (userId, limitCount = 20) => {
-  try {
-    if (!userId) {
-      const currentUser = getCurrentUser();
-      if (!currentUser) {
-        throw new Error("로그인이 필요합니다.");
-      }
-      userId = currentUser.uid;
-    }
+export const getUserContenders = async (userId) => {
+  if (!userId) {
+    console.warn("getUserContenders 호출 시 userId가 필요합니다.");
+    return [];
+  }
 
+  try {
     const q = query(
       collection(db, "contenders"),
       where("creatorId", "==", userId),
-      orderBy("createdAt", "desc"),
-      limit(limitCount)
+      orderBy("createdAt", "desc")
     );
 
     const querySnapshot = await getDocs(q);
     const contenders = querySnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate() || new Date(),
-      updatedAt: doc.data().updatedAt?.toDate() || new Date(),
     }));
 
-    return {
-      success: true,
-      contenders,
-    };
+    return contenders;
   } catch (error) {
     console.error("사용자 contender 조회 오류:", error);
-    return {
-      success: false,
-      error: error.message,
-      contenders: [],
-    };
+    return []; // 오류 발생 시 빈 배열 반환
   }
 };
-
 /**
  * 사용 가능한 콘텐츠 조회
  */
@@ -742,6 +977,39 @@ export const getAvailableContenders = async (
     };
   }
 };
+
+/**
+ * ID로 단일 Contender 상세 정보 조회
+ */
+export const getContenderDetail = async (contenderId) => {
+  try {
+    if (!contenderId) {
+      return { success: false, message: "콘텐츠 ID가 필요합니다." };
+    }
+    const contenderRef = doc(db, "contenders", contenderId);
+    const contenderDoc = await getDoc(contenderRef);
+
+    if (!contenderDoc.exists()) {
+      return { success: false, message: "콘텐츠를 찾을 수 없습니다." };
+    }
+
+    const contenderData = contenderDoc.data();
+
+    const processedData = {
+      id: contenderDoc.id,
+      ...contenderData,
+      createdAt: contenderData.createdAt?.toDate() || new Date(),
+      updatedAt: contenderData.updatedAt?.toDate() || new Date(),
+    };
+
+    return { success: true, contender: processedData };
+  } catch (error) {
+    console.error("단일 콘텐츠 조회 실패:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ==================== 콘텐츠 관리 함수들 ====================
 
 /**
  * 콘텐츠 삭제
@@ -793,6 +1061,66 @@ export const deleteContender = async (contenderId, userId) => {
 };
 
 /**
+ * 콘텐츠 업데이트 (시간 설정 등)
+ */
+export const updateContenderTimeSettings = async (
+  contenderId,
+  timeSettings,
+  userId
+) => {
+  try {
+    if (!userId) {
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      userId = currentUser.uid;
+    }
+
+    const contenderRef = doc(db, "contenders", contenderId);
+    const contenderDoc = await getDoc(contenderRef);
+
+    if (!contenderDoc.exists()) {
+      throw new Error("콘텐츠를 찾을 수 없습니다.");
+    }
+
+    const contenderData = contenderDoc.data();
+
+    if (contenderData.creatorId !== userId) {
+      throw new Error("수정 권한이 없습니다.");
+    }
+
+    if (contenderData.platform !== "youtube") {
+      throw new Error("YouTube 콘텐츠만 시간 설정을 수정할 수 있습니다.");
+    }
+
+    const updates = {
+      timeSettings: {
+        ...timeSettings,
+        source: "user", // 수동 업데이트는 항상 사용자 설정
+        updatedAt: new Date().toISOString(),
+      },
+      updatedAt: serverTimestamp(),
+    };
+
+    await updateDoc(contenderRef, updates);
+
+    return {
+      success: true,
+      message: "시간 설정이 업데이트되었습니다.",
+    };
+  } catch (error) {
+    console.error("시간 설정 업데이트 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+};
+
+// ==================== 디버깅 및 관리 함수들 ====================
+
+/**
  * 콘텐츠 상태 디버깅
  */
 export const debugContenderStatus = async () => {
@@ -811,11 +1139,11 @@ export const debugContenderStatus = async () => {
         `- ${c.title}: status=${c.status}, creator=${c.creatorId?.slice(
           0,
           8
-        )}, category=${c.category}, platform=${c.platform}, timeSource=${
-          c.timeSettings?.source || "none"
-        }, isLive=${c.isLiveStream || false}, isTikTok=${
-          c.platform === "tiktok"
-        }`
+        )}, category=${c.category}, platforms=${JSON.stringify(
+          c.platforms || [c.platform]
+        )}, timeSource=${c.timeSettings?.source || "none"}, isLive=${
+          c.isLiveStream || false
+        }, isTikTok=${c.platform === "tiktok"}`
       );
     });
 
@@ -833,6 +1161,9 @@ export const debugContenderStatus = async () => {
       liveStreams: contenders.filter((c) => c.isLiveStream).length,
       youtubeShorts: contenders.filter((c) => c.isYouTubeShorts).length,
       tiktokVideos: contenders.filter((c) => c.platform === "tiktok").length,
+      multiPlatform: contenders.filter(
+        (c) => c.platforms && c.platforms.length > 1
+      ).length,
       contenders,
     };
   } catch (error) {
@@ -883,39 +1214,10 @@ export const resetAllContendersToAvailable = async () => {
   }
 };
 
-/**
- * YouTube 시간 설정 유틸리티 함수들
- */
-export const formatTimeSettings = (timeSettings) => {
-  if (!timeSettings) return null;
-
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, "0")}:${s
-        .toString()
-        .padStart(2, "0")}`;
-    }
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  return {
-    ...timeSettings,
-    startTimeFormatted:
-      timeSettings.startTime > 0 ? formatTime(timeSettings.startTime) : null,
-    endTimeFormatted:
-      timeSettings.endTime > 0 ? formatTime(timeSettings.endTime) : null,
-    isUserSetting: timeSettings.source === "user",
-    isUrlSetting: timeSettings.source === "url",
-    isLiveContent: timeSettings.isLiveContent || false,
-  };
-};
+// ==================== 통계 및 분석 함수들 ====================
 
 /**
- * 콘텐츠 플랫폼별 통계 - 시간 설정 소스 및 라이브 스트림, TikTok 포함
+ * 콘텐츠 플랫폼별 통계 - 다중 플랫폼 지원
  */
 export const getContentStatsByPlatform = async () => {
   try {
@@ -929,6 +1231,10 @@ export const getContentStatsByPlatform = async () => {
       total: snapshot.size,
       byPlatform: {},
       byCategory: {},
+      multiPlatform: {
+        total: 0,
+        combinations: {},
+      },
       timeSettings: {
         total: 0,
         userSet: 0,
@@ -951,18 +1257,28 @@ export const getContentStatsByPlatform = async () => {
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data();
-      const platform = data.platform || "image";
+      const platforms = data.platforms || [data.platform || "image"];
       const category = data.category || "unknown";
       const timeSettings = data.timeSettings;
 
-      // 플랫폼별 통계
-      stats.byPlatform[platform] = (stats.byPlatform[platform] || 0) + 1;
+      // 플랫폼별 통계 (다중 플랫폼 지원)
+      platforms.forEach((platform) => {
+        stats.byPlatform[platform] = (stats.byPlatform[platform] || 0) + 1;
+      });
+
+      // 다중 플랫폼 통계
+      if (platforms.length > 1) {
+        stats.multiPlatform.total++;
+        const combination = platforms.sort().join("+");
+        stats.multiPlatform.combinations[combination] =
+          (stats.multiPlatform.combinations[combination] || 0) + 1;
+      }
 
       // 카테고리별 통계
       stats.byCategory[category] = (stats.byCategory[category] || 0) + 1;
 
       // YouTube 관련 통계
-      if (platform === "youtube") {
+      if (platforms.includes("youtube")) {
         stats.youtubeContent.total++;
 
         if (data.isLiveStream) {
@@ -987,7 +1303,7 @@ export const getContentStatsByPlatform = async () => {
       }
 
       // TikTok 관련 통계
-      if (platform === "tiktok") {
+      if (platforms.includes("tiktok")) {
         stats.tiktokContent.total++;
 
         if (data.embedType === "oembed") {
@@ -1015,6 +1331,8 @@ export const getContentStatsByPlatform = async () => {
     };
   }
 };
+
+// ==================== 특화 콘텐츠 조회 함수들 ====================
 
 /**
  * 라이브 스트림 콘텐츠만 조회
@@ -1122,6 +1440,50 @@ export const getYouTubeShortsContenders = async (limitCount = 20) => {
 };
 
 /**
+ * 다중 플랫폼 콘텐츠만 조회
+ */
+export const getMultiPlatformContenders = async (limitCount = 20) => {
+  try {
+    const contendersQuery = query(
+      collection(db, "contenders"),
+      where("status", "==", "available"),
+      orderBy("createdAt", "desc"),
+      limit(limitCount * 2) // 더 많이 가져와서 필터링
+    );
+
+    const querySnapshot = await getDocs(contendersQuery);
+    const allContenders = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }));
+
+    // 다중 플랫폼 콘텐츠만 필터링
+    const multiPlatformContenders = allContenders
+      .filter((contender) => {
+        const platforms = contender.platforms || [contender.platform];
+        return platforms.length > 1;
+      })
+      .slice(0, limitCount);
+
+    return {
+      success: true,
+      contenders: multiPlatformContenders,
+      count: multiPlatformContenders.length,
+    };
+  } catch (error) {
+    console.error("다중 플랫폼 콘텐츠 조회 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+      contenders: [],
+    };
+  }
+};
+
+// ==================== URL 검증 및 유틸리티 함수들 ====================
+
+/**
  * URL 유효성 검사 및 타입 감지
  */
 export const validateAndDetectUrl = async (url) => {
@@ -1194,156 +1556,6 @@ export const validateAndDetectUrl = async (url) => {
 };
 
 /**
- * 고급 콘텐츠 필터링
- */
-export const getFilteredContenders = async (filters = {}) => {
-  try {
-    let whereConditions = [where("status", "==", "available")];
-
-    // 카테고리 필터
-    if (filters.category) {
-      whereConditions.push(where("category", "==", filters.category));
-    }
-
-    // 플랫폼 필터
-    if (filters.platform) {
-      whereConditions.push(where("platform", "==", filters.platform));
-    }
-
-    // 시간 설정 소스 필터
-    if (filters.timeSource) {
-      whereConditions.push(
-        where("timeSettings.source", "==", filters.timeSource)
-      );
-    }
-
-    // YouTube 특별 필터
-    if (filters.youtubeType) {
-      whereConditions.push(where("platform", "==", "youtube"));
-
-      switch (filters.youtubeType) {
-        case "live":
-          whereConditions.push(where("isLiveStream", "==", true));
-          break;
-        case "shorts":
-          whereConditions.push(where("isYouTubeShorts", "==", true));
-          break;
-        case "regular":
-          whereConditions.push(where("isLiveStream", "!=", true));
-          whereConditions.push(where("isYouTubeShorts", "!=", true));
-          break;
-      }
-    }
-
-    // TikTok 특별 필터
-    if (filters.tiktokType) {
-      whereConditions.push(where("platform", "==", "tiktok"));
-
-      switch (filters.tiktokType) {
-        case "oembed":
-          whereConditions.push(where("embedType", "==", "oembed"));
-          break;
-        case "custom":
-          whereConditions.push(where("embedType", "==", "custom"));
-          break;
-      }
-    }
-
-    // 생성자 필터
-    if (filters.creatorId) {
-      whereConditions.push(where("creatorId", "==", filters.creatorId));
-    }
-
-    const q = query(
-      collection(db, "contenders"),
-      ...whereConditions,
-      orderBy(filters.orderBy || "createdAt", filters.order || "desc"),
-      limit(filters.limit || 50)
-    );
-
-    const querySnapshot = await getDocs(q);
-    const contenders = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate() || new Date(),
-      updatedAt: doc.data().updatedAt?.toDate() || new Date(),
-    }));
-
-    return {
-      success: true,
-      contenders,
-      count: contenders.length,
-      filters: filters,
-    };
-  } catch (error) {
-    console.error("필터링된 콘텐츠 조회 오류:", error);
-    return {
-      success: false,
-      error: error.message,
-      contenders: [],
-    };
-  }
-};
-
-/**
- * 콘텐츠 업데이트 (시간 설정 등)
- */
-export const updateContenderTimeSettings = async (
-  contenderId,
-  timeSettings,
-  userId
-) => {
-  try {
-    if (!userId) {
-      const currentUser = getCurrentUser();
-      if (!currentUser) {
-        throw new Error("로그인이 필요합니다.");
-      }
-      userId = currentUser.uid;
-    }
-
-    const contenderRef = doc(db, "contenders", contenderId);
-    const contenderDoc = await getDoc(contenderRef);
-
-    if (!contenderDoc.exists()) {
-      throw new Error("콘텐츠를 찾을 수 없습니다.");
-    }
-
-    const contenderData = contenderDoc.data();
-
-    if (contenderData.creatorId !== userId) {
-      throw new Error("수정 권한이 없습니다.");
-    }
-
-    if (contenderData.platform !== "youtube") {
-      throw new Error("YouTube 콘텐츠만 시간 설정을 수정할 수 있습니다.");
-    }
-
-    const updates = {
-      timeSettings: {
-        ...timeSettings,
-        source: "user", // 수동 업데이트는 항상 사용자 설정
-        updatedAt: new Date().toISOString(),
-      },
-      updatedAt: serverTimestamp(),
-    };
-
-    await updateDoc(contenderRef, updates);
-
-    return {
-      success: true,
-      message: "시간 설정이 업데이트되었습니다.",
-    };
-  } catch (error) {
-    console.error("시간 설정 업데이트 오류:", error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
-};
-
-/**
  * 배치 업로드를 위한 URL 검증
  */
 export const validateMultipleUrls = async (urls) => {
@@ -1381,3 +1593,149 @@ export const validateMultipleUrls = async (urls) => {
     },
   };
 };
+
+/**
+ * 고급 콘텐츠 필터링
+ */
+export const getFilteredContenders = async (filters = {}) => {
+  try {
+    let whereConditions = [where("status", "==", "available")];
+
+    // 카테고리 필터
+    if (filters.category) {
+      whereConditions.push(where("category", "==", filters.category));
+    }
+
+    // 플랫폼 필터 (다중 플랫폼 지원)
+    if (filters.platform) {
+      // 단일 플랫폼이거나 플랫폼 배열에 포함된 경우
+      whereConditions.push(
+        where("platforms", "array-contains", filters.platform)
+      );
+    }
+
+    // 시간 설정 소스 필터
+    if (filters.timeSource) {
+      whereConditions.push(
+        where("timeSettings.source", "==", filters.timeSource)
+      );
+    }
+
+    // YouTube 특별 필터
+    if (filters.youtubeType) {
+      whereConditions.push(where("platforms", "array-contains", "youtube"));
+
+      switch (filters.youtubeType) {
+        case "live":
+          whereConditions.push(where("isLiveStream", "==", true));
+          break;
+        case "shorts":
+          whereConditions.push(where("isYouTubeShorts", "==", true));
+          break;
+        case "regular":
+          whereConditions.push(where("isLiveStream", "!=", true));
+          whereConditions.push(where("isYouTubeShorts", "!=", true));
+          break;
+      }
+    }
+
+    // TikTok 특별 필터
+    if (filters.tiktokType) {
+      whereConditions.push(where("platforms", "array-contains", "tiktok"));
+
+      switch (filters.tiktokType) {
+        case "oembed":
+          whereConditions.push(where("embedType", "==", "oembed"));
+          break;
+        case "custom":
+          whereConditions.push(where("embedType", "==", "custom"));
+          break;
+      }
+    }
+
+    // 다중 플랫폼 필터
+    if (filters.multiPlatform) {
+      // 이 경우는 클라이언트에서 필터링해야 함 (Firestore 제한)
+    }
+
+    // 생성자 필터
+    if (filters.creatorId) {
+      whereConditions.push(where("creatorId", "==", filters.creatorId));
+    }
+
+    const q = query(
+      collection(db, "contenders"),
+      ...whereConditions,
+      orderBy(filters.orderBy || "createdAt", filters.order || "desc"),
+      limit(filters.limit || 50)
+    );
+
+    const querySnapshot = await getDocs(q);
+    let contenders = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+      updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+    }));
+
+    // 다중 플랫폼 필터 적용 (클라이언트 사이드)
+    if (filters.multiPlatform) {
+      contenders = contenders.filter((contender) => {
+        const platforms = contender.platforms || [contender.platform];
+        return platforms.length > 1;
+      });
+    }
+
+    return {
+      success: true,
+      contenders,
+      count: contenders.length,
+      filters: filters,
+    };
+  } catch (error) {
+    console.error("필터링된 콘텐츠 조회 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+      contenders: [],
+    };
+  }
+};
+
+// ==================== 추가 유틸리티 함수들 ====================
+
+/**
+ * YouTube 시간 설정 유틸리티 함수들
+ */
+export const formatTimeSettings = (timeSettings) => {
+  if (!timeSettings) return null;
+
+  const formatTime = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s
+        .toString()
+        .padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  return {
+    ...timeSettings,
+    startTimeFormatted:
+      timeSettings.startTime > 0 ? formatTime(timeSettings.startTime) : null,
+    endTimeFormatted:
+      timeSettings.endTime > 0 ? formatTime(timeSettings.endTime) : null,
+    isUserSetting: timeSettings.source === "user",
+    isUrlSetting: timeSettings.source === "url",
+    isLiveContent: timeSettings.isLiveContent || false,
+  };
+};
+// ... (contentService.js 파일의 기존 내용)
+
+/**
+ * 특정 사용자가 업로드한 모든 Contender 조회
+ */

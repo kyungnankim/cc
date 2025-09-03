@@ -1,35 +1,18 @@
-// upload/PostContent.jsx
+// upload/PostContent.jsx - 동적 콘텐츠 아이템 지원 버전
 import React from "react";
-import { Image, Link } from "lucide-react";
-import ImageUpload from "./ImageUpload";
-import MediaUpload from "./MediaUpload";
+import ContentItemList from "./ContentItemList";
 
 const PostContent = ({ post, updatePost }) => {
-  // 콘텐츠 타입 변경 처리
-  const handleContentTypeChange = (type) => {
-    const updates = { contentType: type };
-
-    if (type !== "image") {
-      if (post.imagePreview) {
-        URL.revokeObjectURL(post.imagePreview);
-      }
-      updates.imageFile = null;
-      updates.imagePreview = "";
-    }
-
-    if (type !== "media") {
-      updates.mediaUrl = "";
-      updates.startTime = "";
-      updates.endTime = "";
-      updates.detectedPlatform = null;
-      updates.extractedData = null;
-    }
-
-    updatePost(post.id, updates);
+  // 콘텐츠 아이템 업데이트 처리
+  const handleContentItemsUpdate = (contentItems) => {
+    updatePost(post.id, { contentItems });
   };
 
+  // contentItems가 없으면 빈 배열로 초기화
+  const contentItems = post.contentItems || [];
+
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-6">
       {/* 제목 */}
       <div>
         <label className="text-gray-300 text-sm font-medium mb-2 block">
@@ -44,48 +27,6 @@ const PostContent = ({ post, updatePost }) => {
         />
       </div>
 
-      {/* 콘텐츠 타입 선택 */}
-      <div>
-        <label className="text-gray-300 text-sm font-medium mb-3 block">
-          콘텐츠 타입
-        </label>
-        <div className="grid grid-cols-2 gap-4">
-          <button
-            onClick={() => handleContentTypeChange("image")}
-            className={`p-4 rounded-lg border-2 transition-all ${
-              post.contentType === "image"
-                ? "border-blue-500 bg-blue-500/20 text-white"
-                : "border-gray-700 text-gray-400 hover:border-gray-600"
-            }`}
-          >
-            <Image className="w-6 h-6 mx-auto mb-2" />
-            <span className="text-sm font-medium">이미지</span>
-          </button>
-
-          <button
-            onClick={() => handleContentTypeChange("media")}
-            className={`p-4 rounded-lg border-2 transition-all ${
-              post.contentType === "media"
-                ? "border-blue-500 bg-blue-500/20 text-white"
-                : "border-gray-700 text-gray-400 hover:border-gray-600"
-            }`}
-          >
-            <Link className="w-6 h-6 mx-auto mb-2" />
-            <span className="text-sm font-medium">외부 링크</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 이미지 업로드 */}
-      {post.contentType === "image" && (
-        <ImageUpload post={post} updatePost={updatePost} />
-      )}
-
-      {/* 미디어 URL 입력 */}
-      {post.contentType === "media" && (
-        <MediaUpload post={post} updatePost={updatePost} />
-      )}
-
       {/* 설명 */}
       <div>
         <label className="text-gray-300 text-sm font-medium mb-2 block">
@@ -99,6 +40,112 @@ const PostContent = ({ post, updatePost }) => {
           className="w-full px-4 py-3 bg-gray-800 text-white rounded-lg border border-gray-700 focus:border-pink-500 focus:outline-none transition-colors resize-none"
         />
       </div>
+
+      {/* 콘텐츠 아이템 관리 */}
+      <div className="bg-gray-800/20 rounded-lg p-4 border border-gray-600">
+        <ContentItemList
+          contentItems={contentItems}
+          onUpdateContentItems={handleContentItemsUpdate}
+        />
+      </div>
+
+      {/* 콘텐츠 미리보기 (요약) */}
+      {contentItems.length > 0 && (
+        <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
+          <h5 className="text-gray-300 font-medium mb-3">
+            업로드될 콘텐츠 미리보기
+          </h5>
+          <div className="space-y-2">
+            {contentItems.map((item, index) => (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 p-2 bg-gray-700/50 rounded"
+              >
+                {/* 순번 */}
+                <span className="w-6 h-6 bg-gray-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                  {index + 1}
+                </span>
+
+                {/* 콘텐츠 정보 */}
+                {item.type === "image" ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    {item.imagePreview && (
+                      <img
+                        src={item.imagePreview}
+                        alt="미리보기"
+                        className="w-10 h-10 object-cover rounded"
+                      />
+                    )}
+                    <div>
+                      <p className="text-white text-sm font-medium">
+                        이미지 {item.imageFile ? "✓" : "⚠️"}
+                      </p>
+                      <p className="text-gray-400 text-xs">
+                        {item.imageFile?.name || "파일 선택 필요"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-1">
+                    <div
+                      className={`w-10 h-10 rounded flex items-center justify-center text-white text-xs font-bold ${
+                        item.detectedPlatform === "youtube"
+                          ? "bg-red-600"
+                          : item.detectedPlatform === "tiktok"
+                          ? "bg-black"
+                          : item.detectedPlatform === "instagram"
+                          ? "bg-gradient-to-r from-purple-500 to-pink-500"
+                          : "bg-gray-600"
+                      }`}
+                    >
+                      {item.detectedPlatform?.slice(0, 2).toUpperCase() ||
+                        "LINK"}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-white text-sm font-medium">
+                        {item.detectedPlatform
+                          ? `${
+                              item.detectedPlatform.charAt(0).toUpperCase() +
+                              item.detectedPlatform.slice(1)
+                            } 링크`
+                          : "외부 링크"}
+                        {item.detectedPlatform ? " ✓" : " ⚠️"}
+                      </p>
+                      <p className="text-gray-400 text-xs truncate">
+                        {item.mediaUrl || "URL 입력 필요"}
+                      </p>
+
+                      {/* YouTube 시간 정보 */}
+                      {item.detectedPlatform === "youtube" &&
+                        (item.startTime || item.endTime) && (
+                          <p className="text-blue-400 text-xs">
+                            시간: {item.startTime || "0:00"} ~{" "}
+                            {item.endTime || "끝"}
+                          </p>
+                        )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 상태 표시 */}
+                <div className="text-right">
+                  {item.type === "image" ? (
+                    item.imageFile ? (
+                      <span className="text-green-400 text-xs">준비됨</span>
+                    ) : (
+                      <span className="text-yellow-400 text-xs">파일 필요</span>
+                    )
+                  ) : item.detectedPlatform ? (
+                    <span className="text-green-400 text-xs">분석 완료</span>
+                  ) : (
+                    <span className="text-yellow-400 text-xs">URL 필요</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

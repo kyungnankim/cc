@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import toast from "react-hot-toast";
+import ContentDetail from "./components/ContentDetail.jsx"; // 2단계에서 만든 컴포넌트 import
 
 import Header from "./components/Header";
 import Login from "./components/Login";
@@ -94,7 +95,7 @@ function MainApp() {
           <Route path="/about/*" element={<About />} />
           <Route path="/magazine/*" element={<CultureMagazine />} />
           <Route path="/entertainment/*" element={<Entertainment />} />
-
+          <Route path="/content/:id" element={<ContentDetail />} />
           <Route path="/game" element={<Game user={user} />} />
           <Route path="/localMusic" element={<DefaultGame user={user} />} />
           <Route
