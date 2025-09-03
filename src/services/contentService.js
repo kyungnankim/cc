@@ -1,4 +1,4 @@
-// src/services/contentService.js - YouTube 라이브 스트림 지원 완전 버전
+// src/services/contentService.js - 최종 완전 버전 (YouTube 라이브 스트림 + TikTok 임베드 개선)
 
 import { auth, db } from "../firebase/config";
 import {
@@ -15,9 +15,88 @@ import {
   getDoc,
 } from "firebase/firestore";
 
+// 세션에서 현재 사용자 가져오기 함수
+const getCurrentUser = () => {
+  try {
+    const userData = sessionStorage.getItem("currentUser");
+    if (userData) {
+      return JSON.parse(userData);
+    }
+    return null;
+  } catch (error) {
+    console.error("사용자 정보 파싱 오류:", error);
+    return null;
+  }
+};
+
 // ==================== 유틸리티 함수들 ====================
 
-// URL에서 플랫폼 감지 및 데이터 추출 - 라이브 스트림 지원
+// TikTok blockquote HTML 생성 함수 (개선된 버전)
+const createTikTokBlockquote = (
+  videoId,
+  username,
+  url,
+  title = null,
+  hashtags = []
+) => {
+  // 안전한 HTML 생성을 위한 이스케이프 함수
+  const escapeHtml = (text) => {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  };
+
+  const safeUsername = username ? escapeHtml(username) : "tiktok";
+  const safeTitle = title
+    ? escapeHtml(title)
+    : `@${safeUsername}의 TikTok 영상`;
+  const safeVideoId = videoId ? escapeHtml(videoId.toString()) : "";
+  const safeUrl = url ? escapeHtml(url) : "#";
+
+  // 해시태그 HTML 생성
+  const hashtagsHtml =
+    hashtags && hashtags.length > 0
+      ? hashtags
+          .map(
+            (tag) =>
+              `<a title="${escapeHtml(
+                tag
+              )}" target="_blank" href="https://www.tiktok.com/tag/${encodeURIComponent(
+                tag
+              )}?refer=embed">#${escapeHtml(tag)}</a>`
+          )
+          .join(" ")
+      : "";
+
+  return `<blockquote class="tiktok-embed" 
+                    cite="${safeUrl}" 
+                    data-video-id="${safeVideoId}" 
+                    style="max-width: 605px; min-width: 325px; margin: 0 auto; background: #000; border-radius: 8px;">
+    <section style="padding: 16px; color: #fff;">
+      <a target="_blank" 
+         title="@${safeUsername}" 
+         href="${safeUrl}"
+         style="color: #fff; text-decoration: none; font-weight: bold;">
+        @${safeUsername}
+      </a>
+      <p style="margin: 8px 0; color: #fff; font-size: 14px; line-height: 1.4;">
+        ${safeTitle}
+      </p>
+      ${
+        hashtagsHtml
+          ? `<div style="margin: 8px 0; font-size: 12px;">${hashtagsHtml}</div>`
+          : ""
+      }
+      <a target="_blank" 
+         href="${safeUrl}"
+         style="display: inline-block; margin-top: 8px; padding: 6px 12px; background: #ff0050; color: #fff; text-decoration: none; border-radius: 4px; font-size: 12px;">
+        TikTok에서 보기
+      </a>
+    </section>
+  </blockquote>`;
+};
+
+// URL에서 플랫폼 감지 및 데이터 추출 - 라이브 스트림 지원 + TikTok 임베드 개선
 export const detectPlatformAndExtract = async (url) => {
   if (!url) return null;
 
@@ -64,77 +143,15 @@ export const detectPlatformAndExtract = async (url) => {
       };
     }
 
-    // TikTok 감지 및 oEmbed API 호출
+    // TikTok 감지 및 처리 (개선된 버전)
     const tiktokRegex =
-      /(?:tiktok\.com\/@[\w.-]+\/video\/(\d+)|tiktok\.com\/t\/(\w+)|vm\.tiktok\.com\/(\w+)|tiktok\.com\/v\/(\d+)|m\.tiktok\.com)/;
+      /(?:(?:https?:\/\/)?(?:www\.|vm\.|m\.)?tiktok\.com\/(?:@[\w.-]+\/video\/(\d+)|t\/(\w+)|v\/(\d+))|(?:https?:\/\/)?vm\.tiktok\.com\/(\w+))/i;
     const tiktokMatch = url.match(tiktokRegex);
+
     if (tiktokMatch) {
       console.log("🎵 TikTok URL 감지됨");
 
-      // 먼저 TikTok oEmbed API 시도
-      try {
-        console.log("📡 TikTok oEmbed API 호출 시도:", url);
-
-        const response = await fetch(
-          `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-            },
-          }
-        );
-
-        if (response.ok) {
-          const oembedData = await response.json();
-          console.log("✅ TikTok oEmbed 성공:", oembedData);
-
-          // 비디오 ID 추출
-          const videoId =
-            tiktokMatch[1] ||
-            tiktokMatch[2] ||
-            tiktokMatch[3] ||
-            tiktokMatch[4] ||
-            "unknown";
-
-          // 사용자명 추출 (URL에서 또는 oEmbed 데이터에서)
-          const userMatch = url.match(/@([\w.-]+)/);
-          const username = userMatch ? userMatch[1] : null;
-
-          return {
-            platform: "tiktok",
-            videoId,
-            username: username || oembedData.author_name,
-            originalUrl: url,
-            embedUrl: url,
-            // oEmbed API 데이터
-            title: oembedData.title,
-            authorName: oembedData.author_name,
-            authorUrl: oembedData.author_url,
-            thumbnailUrl: oembedData.thumbnail_url,
-            thumbnailWidth: oembedData.thumbnail_width,
-            thumbnailHeight: oembedData.thumbnail_height,
-            html: oembedData.html, // 중요: 실제 임베드 HTML
-            providerName: oembedData.provider_name,
-            providerUrl: oembedData.provider_url,
-            version: oembedData.version,
-            type: oembedData.type,
-          };
-        } else {
-          console.warn(
-            "⚠️ TikTok oEmbed API 응답 오류:",
-            response.status,
-            response.statusText
-          );
-        }
-      } catch (error) {
-        console.warn(
-          "⚠️ TikTok oEmbed API 호출 실패, 기본 처리로 fallback:",
-          error
-        );
-      }
-
-      // API 실패 시 기본 처리
+      // 비디오 ID와 사용자명 추출
       const videoId =
         tiktokMatch[1] ||
         tiktokMatch[2] ||
@@ -144,7 +161,90 @@ export const detectPlatformAndExtract = async (url) => {
       const userMatch = url.match(/@([\w.-]+)/);
       const username = userMatch ? userMatch[1] : null;
 
-      console.log("✅ TikTok 기본 처리:", { videoId, username });
+      console.log("🎵 TikTok 정보 추출:", { videoId, username, url });
+
+      // 1차: TikTok oEmbed API 시도 (공식 방법)
+      try {
+        console.log("📡 TikTok oEmbed API 호출 시도:", url);
+
+        const oembedResponse = await fetch(
+          `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            timeout: 10000, // 10초 타임아웃
+          }
+        );
+
+        if (oembedResponse.ok) {
+          const oembedData = await oembedResponse.json();
+          console.log("✅ TikTok oEmbed 성공:", oembedData);
+
+          // oEmbed에서 받은 HTML이 있으면 사용
+          if (oembedData.html) {
+            return {
+              platform: "tiktok",
+              videoId,
+              username: username || oembedData.author_name,
+              originalUrl: url,
+              embedUrl: url,
+              title: oembedData.title,
+              authorName: oembedData.author_name,
+              authorUrl: oembedData.author_url,
+              thumbnailUrl: oembedData.thumbnail_url,
+              thumbnailWidth: oembedData.thumbnail_width,
+              thumbnailHeight: oembedData.thumbnail_height,
+              html: oembedData.html, // 공식 oEmbed HTML 사용
+              providerName: oembedData.provider_name,
+              providerUrl: oembedData.provider_url,
+              version: oembedData.version,
+              type: oembedData.type,
+              embedType: "oembed", // 임베드 타입 표시
+            };
+          }
+        } else {
+          console.warn(
+            "⚠️ TikTok oEmbed API 응답 오류:",
+            oembedResponse.status,
+            oembedResponse.statusText
+          );
+        }
+      } catch (error) {
+        console.warn("⚠️ TikTok oEmbed API 호출 실패:", error.message);
+      }
+
+      // 2차: 직접 blockquote HTML 생성 (fallback)
+      console.log("🔧 TikTok blockquote HTML 직접 생성");
+
+      // URL에서 더 많은 정보 추출 시도
+      let extractedTitle = null;
+      let extractedHashtags = [];
+
+      // 제목이나 해시태그를 URL에서 추출할 수 있다면 (실제로는 제한적)
+      if (username) {
+        extractedTitle = `@${username}의 TikTok`;
+      }
+
+      // 직접 생성한 blockquote HTML
+      const generatedBlockquoteHtml = createTikTokBlockquote(
+        videoId,
+        username,
+        url,
+        extractedTitle,
+        extractedHashtags
+      );
+
+      // TikTok 스크립트도 포함된 완전한 HTML
+      const completeHtml = `
+        ${generatedBlockquoteHtml}
+        <script async src="https://www.tiktok.com/embed.js"></script>
+      `;
+
+      console.log("✅ TikTok 사용자 정의 blockquote 생성 완료");
 
       return {
         platform: "tiktok",
@@ -152,11 +252,15 @@ export const detectPlatformAndExtract = async (url) => {
         username,
         originalUrl: url,
         embedUrl: url,
-        title: username ? `@${username}의 TikTok` : "TikTok 비디오",
+        title: extractedTitle || "TikTok 비디오",
         authorName: username,
+        thumbnailUrl: null, // TikTok은 직접 썸네일 URL 제공 안함
+        html: completeHtml, // 생성된 완전한 HTML
+        blockquoteHtml: generatedBlockquoteHtml, // blockquote만 따로 저장
+        embedType: "custom", // 사용자 정의 임베드임을 표시
         displayInfo: {
-          title: username ? `@${username}의 TikTok` : "TikTok 비디오",
-          description: "TikTok 동영상 콘텐츠",
+          title: extractedTitle || "TikTok 비디오",
+          description: "TikTok 동영상 콘텐츠 - 사이트 내 재생 지원",
         },
       };
     }
@@ -251,10 +355,10 @@ const uploadImage = async (imageFile) => {
 // ==================== 메인 콘텐츠 서비스 함수들 ====================
 
 /**
- * 단일 콘텐츠 업로드 - 사용자 시간 설정 우선 적용
+ * 단일 콘텐츠 업로드 - 라이브 스트림 지원 + TikTok 임베드 개선 버전
  */
 export const uploadContender = async (formData, imageFile) => {
-  const currentUser = auth.currentUser;
+  const currentUser = getCurrentUser();
   if (!currentUser) {
     throw new Error("로그인이 필요합니다.");
   }
@@ -289,6 +393,10 @@ export const uploadContender = async (formData, imageFile) => {
       // 플랫폼별 기본 이미지 설정
       if (platform === "youtube") {
         imageUrl = extractedData.thumbnailUrl || "/images/popo.png";
+      } else if (platform === "tiktok") {
+        // TikTok은 썸네일 URL이 없으므로 기본 이미지 사용
+        imageUrl =
+          extractedData.thumbnailUrl || "/images/tiktok-placeholder.png";
       } else {
         imageUrl = "/images/popo.png";
       }
@@ -296,7 +404,7 @@ export const uploadContender = async (formData, imageFile) => {
       throw new Error("콘텐츠 정보가 올바르지 않습니다.");
     }
 
-    // 사용자 시간 설정 우선 처리
+    // 사용자 시간 설정 우선 처리 (YouTube만)
     let timeSettings = null;
 
     if (platform === "youtube") {
@@ -387,22 +495,28 @@ export const uploadContender = async (formData, imageFile) => {
         }),
       }),
 
-      // Instagram 특별 처리 (호환성)
-      ...(platform === "instagram" && {
-        instagramUrl: extractedData.originalUrl,
-        postType: extractedData.postType,
-      }),
-
-      // TikTok 특별 처리
+      // TikTok 특별 처리 (개선된 버전)
       ...(platform === "tiktok" && {
         tiktokUrl: extractedData.originalUrl,
         tiktokId: extractedData.videoId,
-        // TikTok HTML 임베드 저장
+        tiktokUsername: extractedData.username,
+        // TikTok HTML 임베드 저장 (핵심!)
         ...(extractedData.html && { tiktokHtml: extractedData.html }),
+        ...(extractedData.blockquoteHtml && {
+          tiktokBlockquote: extractedData.blockquoteHtml,
+        }),
         ...(extractedData.title && { originalTitle: extractedData.title }),
         ...(extractedData.authorName && {
           originalAuthor: extractedData.authorName,
         }),
+        // 임베드 타입 정보 저장
+        embedType: extractedData.embedType || "custom",
+      }),
+
+      // Instagram 특별 처리 (호환성)
+      ...(platform === "instagram" && {
+        instagramUrl: extractedData.originalUrl,
+        postType: extractedData.postType,
       }),
 
       // 시간 설정 (사용자 설정 우선)
@@ -423,6 +537,15 @@ export const uploadContender = async (formData, imageFile) => {
     const docRef = await addDoc(collection(db, "contenders"), contenderData);
 
     console.log("✅ Firestore 저장 완료! 문서 ID:", docRef.id);
+
+    // 플랫폼별 특별 로그
+    if (platform === "tiktok") {
+      console.log("🎵 TikTok 콘텐츠 업로드 완료:");
+      console.log("  - 비디오 ID:", extractedData.videoId);
+      console.log("  - 사용자명:", extractedData.username);
+      console.log("  - 임베드 타입:", extractedData.embedType);
+      console.log("  - HTML 임베드 있음:", !!extractedData.html);
+    }
 
     // 자동 매칭 시도 (선택적)
     try {
@@ -463,10 +586,10 @@ export const uploadContender = async (formData, imageFile) => {
 };
 
 /**
- * 다중 콘텐츠 업로드 (수정됨)
+ * 다중 콘텐츠 업로드
  */
 export const uploadMultipleContenders = async (postsData, category) => {
-  const currentUser = auth.currentUser;
+  const currentUser = getCurrentUser();
   if (!currentUser) {
     throw new Error("로그인이 필요합니다.");
   }
@@ -535,6 +658,14 @@ export const uploadMultipleContenders = async (postsData, category) => {
  */
 export const getUserContenders = async (userId, limitCount = 20) => {
   try {
+    if (!userId) {
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      userId = currentUser.uid;
+    }
+
     const q = query(
       collection(db, "contenders"),
       where("creatorId", "==", userId),
@@ -617,6 +748,14 @@ export const getAvailableContenders = async (
  */
 export const deleteContender = async (contenderId, userId) => {
   try {
+    if (!userId) {
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      userId = currentUser.uid;
+    }
+
     const contenderRef = doc(db, "contenders", contenderId);
     const contenderDoc = await getDoc(contenderRef);
 
@@ -674,7 +813,9 @@ export const debugContenderStatus = async () => {
           8
         )}, category=${c.category}, platform=${c.platform}, timeSource=${
           c.timeSettings?.source || "none"
-        }, isLive=${c.isLiveStream || false}`
+        }, isLive=${c.isLiveStream || false}, isTikTok=${
+          c.platform === "tiktok"
+        }`
       );
     });
 
@@ -691,6 +832,7 @@ export const debugContenderStatus = async () => {
       ).length,
       liveStreams: contenders.filter((c) => c.isLiveStream).length,
       youtubeShorts: contenders.filter((c) => c.isYouTubeShorts).length,
+      tiktokVideos: contenders.filter((c) => c.platform === "tiktok").length,
       contenders,
     };
   } catch (error) {
@@ -773,7 +915,7 @@ export const formatTimeSettings = (timeSettings) => {
 };
 
 /**
- * 콘텐츠 플랫폼별 통계 - 시간 설정 소스 및 라이브 스트림 포함
+ * 콘텐츠 플랫폼별 통계 - 시간 설정 소스 및 라이브 스트림, TikTok 포함
  */
 export const getContentStatsByPlatform = async () => {
   try {
@@ -798,6 +940,12 @@ export const getContentStatsByPlatform = async () => {
         regularVideos: 0,
         liveStreams: 0,
         shorts: 0,
+      },
+      tiktokContent: {
+        total: 0,
+        withOembedHtml: 0,
+        withCustomHtml: 0,
+        withUsername: 0,
       },
     };
 
@@ -837,6 +985,21 @@ export const getContentStatsByPlatform = async () => {
           stats.timeSettings.noTimeSettings++;
         }
       }
+
+      // TikTok 관련 통계
+      if (platform === "tiktok") {
+        stats.tiktokContent.total++;
+
+        if (data.embedType === "oembed") {
+          stats.tiktokContent.withOembedHtml++;
+        } else if (data.embedType === "custom") {
+          stats.tiktokContent.withCustomHtml++;
+        }
+
+        if (data.tiktokUsername) {
+          stats.tiktokContent.withUsername++;
+        }
+      }
     });
 
     return {
@@ -852,10 +1015,6 @@ export const getContentStatsByPlatform = async () => {
     };
   }
 };
-
-/**
- * YouTube 라이브 스트림 전용 함수들
- */
 
 /**
  * 라이브 스트림 콘텐츠만 조회
@@ -884,6 +1043,41 @@ export const getLiveStreamContenders = async (limitCount = 20) => {
     };
   } catch (error) {
     console.error("라이브 스트림 조회 오류:", error);
+    return {
+      success: false,
+      error: error.message,
+      contenders: [],
+    };
+  }
+};
+
+/**
+ * TikTok 콘텐츠만 조회
+ */
+export const getTikTokContenders = async (limitCount = 20) => {
+  try {
+    const q = query(
+      collection(db, "contenders"),
+      where("status", "==", "available"),
+      where("platform", "==", "tiktok"),
+      orderBy("createdAt", "desc"),
+      limit(limitCount)
+    );
+
+    const querySnapshot = await getDocs(q);
+    const contenders = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }));
+
+    return {
+      success: true,
+      contenders,
+      count: contenders.length,
+    };
+  } catch (error) {
+    console.error("TikTok 콘텐츠 조회 오류:", error);
     return {
       success: false,
       error: error.message,
@@ -928,65 +1122,6 @@ export const getYouTubeShortsContenders = async (limitCount = 20) => {
 };
 
 /**
- * 콘텐츠 타입별 조회 (일반 영상, 라이브, Shorts)
- */
-export const getContendersByYouTubeType = async (
-  contentType,
-  limitCount = 20
-) => {
-  try {
-    let whereConditions = [
-      where("status", "==", "available"),
-      where("platform", "==", "youtube"),
-    ];
-
-    switch (contentType) {
-      case "live":
-        whereConditions.push(where("isLiveStream", "==", true));
-        break;
-      case "shorts":
-        whereConditions.push(where("isYouTubeShorts", "==", true));
-        break;
-      case "regular":
-        whereConditions.push(where("isLiveStream", "!=", true));
-        whereConditions.push(where("isYouTubeShorts", "!=", true));
-        break;
-      default:
-        // 모든 YouTube 콘텐츠
-        break;
-    }
-
-    const q = query(
-      collection(db, "contenders"),
-      ...whereConditions,
-      orderBy("createdAt", "desc"),
-      limit(limitCount)
-    );
-
-    const querySnapshot = await getDocs(q);
-    const contenders = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate() || new Date(),
-    }));
-
-    return {
-      success: true,
-      contenders,
-      count: contenders.length,
-      contentType,
-    };
-  } catch (error) {
-    console.error(`YouTube ${contentType} 콘텐츠 조회 오류:`, error);
-    return {
-      success: false,
-      error: error.message,
-      contenders: [],
-    };
-  }
-};
-
-/**
  * URL 유효성 검사 및 타입 감지
  */
 export const validateAndDetectUrl = async (url) => {
@@ -1012,7 +1147,7 @@ export const validateAndDetectUrl = async (url) => {
       extractedData: detected,
     };
 
-    // 플랫폼별 특별 검증
+    // YouTube 특별 검증
     if (detected.platform === "youtube") {
       validation.youtubeSpecific = {
         videoId: detected.videoId,
@@ -1023,17 +1158,29 @@ export const validateAndDetectUrl = async (url) => {
         thumbnailAvailable: !!detected.thumbnailUrl,
       };
 
-      // 라이브 스트림 특별 안내
       if (detected.isLive) {
         validation.liveStreamNote =
           "라이브 스트림은 실시간 콘텐츠입니다. 시간 설정이 제한적일 수 있습니다.";
       }
 
-      // Shorts 특별 안내
       if (detected.isShorts) {
         validation.shortsNote =
           "YouTube Shorts는 짧은 세로 영상입니다. 시간 설정은 60초 이내로 제한됩니다.";
       }
+    }
+
+    // TikTok 특별 검증
+    if (detected.platform === "tiktok") {
+      validation.tiktokSpecific = {
+        videoId: detected.videoId,
+        username: detected.username,
+        hasOembedHtml: detected.embedType === "oembed",
+        hasCustomHtml: detected.embedType === "custom",
+        htmlEmbedAvailable: !!detected.html,
+      };
+
+      validation.tiktokNote =
+        "TikTok 콘텐츠는 사이트 내에서 직접 재생 가능합니다.";
     }
 
     return validation;
@@ -1088,6 +1235,20 @@ export const getFilteredContenders = async (filters = {}) => {
       }
     }
 
+    // TikTok 특별 필터
+    if (filters.tiktokType) {
+      whereConditions.push(where("platform", "==", "tiktok"));
+
+      switch (filters.tiktokType) {
+        case "oembed":
+          whereConditions.push(where("embedType", "==", "oembed"));
+          break;
+        case "custom":
+          whereConditions.push(where("embedType", "==", "custom"));
+          break;
+      }
+    }
+
     // 생성자 필터
     if (filters.creatorId) {
       whereConditions.push(where("creatorId", "==", filters.creatorId));
@@ -1133,6 +1294,14 @@ export const updateContenderTimeSettings = async (
   userId
 ) => {
   try {
+    if (!userId) {
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        throw new Error("로그인이 필요합니다.");
+      }
+      userId = currentUser.uid;
+    }
+
     const contenderRef = doc(db, "contenders", contenderId);
     const contenderDoc = await getDoc(contenderRef);
 

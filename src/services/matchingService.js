@@ -1,4 +1,4 @@
-// src/services/matchingService.js - 매칭 시스템 서비스
+// src/services/matchingService.js - 세션 기반 인증으로 수정된 버전
 
 import { auth, db } from "../firebase/config";
 import {
@@ -13,6 +13,20 @@ import {
 } from "firebase/firestore";
 
 // ==================== 유틸리티 함수들 ====================
+
+// 세션에서 현재 사용자 가져오기 함수 (contentService와 동일)
+const getCurrentUser = () => {
+  try {
+    const userData = sessionStorage.getItem("currentUser");
+    if (userData) {
+      return JSON.parse(userData);
+    }
+    return null;
+  } catch (error) {
+    console.error("사용자 정보 파싱 오류:", error);
+    return null;
+  }
+};
 
 // 매칭 점수 계산 함수 (플랫폼 고려)
 export const calculateMatchingScore = (contender1, contender2) => {
@@ -59,11 +73,19 @@ export const calculateMatchingScore = (contender1, contender2) => {
 // ==================== 배틀 생성 함수들 ====================
 
 /**
- * 기본 배틀 생성 (미디어 정보 포함)
+ * 기본 배틀 생성 (미디어 정보 포함) - 세션 기반 인증
  */
 export const createBattleFromContenders = async (contenderA, contenderB) => {
-  const currentUser = auth.currentUser;
-  if (!currentUser) throw new Error("로그인이 필요합니다.");
+  const currentUser = getCurrentUser(); // 세션에서 사용자 정보 가져오기
+  if (!currentUser) {
+    throw new Error("로그인이 필요합니다. 세션을 확인해주세요.");
+  }
+
+  console.log("🔐 배틀 생성 사용자 확인:", {
+    uid: currentUser.uid,
+    displayName: currentUser.displayName,
+    email: currentUser.email,
+  });
 
   if (contenderA.category !== contenderB.category) {
     throw new Error("같은 카테고리의 콘텐츠끼리만 배틀할 수 있습니다.");
@@ -94,7 +116,8 @@ export const createBattleFromContenders = async (contenderA, contenderB) => {
 
     const battleData = {
       creatorId: currentUser.uid,
-      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      creatorName:
+        currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
       title: `${contenderA.title} vs ${contenderB.title}`,
       category: contenderA.category,
 
@@ -146,19 +169,27 @@ export const createBattleFromContenders = async (contenderA, contenderB) => {
       battleCount: (contenderDocB.data().battleCount || 0) + 1,
     });
 
+    console.log("✅ 배틀 생성 성공:", battleRef.id);
     return battleRef.id;
   });
 };
 
 /**
- * 유연한 배틀 생성 (카테고리 및 크리에이터 제한 완화)
+ * 유연한 배틀 생성 (카테고리 및 크리에이터 제한 완화) - 세션 기반 인증
  */
 export const createBattleFromContendersFlexible = async (
   contenderA,
   contenderB
 ) => {
-  const currentUser = auth.currentUser;
-  if (!currentUser) throw new Error("로그인이 필요합니다.");
+  const currentUser = getCurrentUser(); // 세션에서 사용자 정보 가져오기
+  if (!currentUser) {
+    throw new Error("로그인이 필요합니다. 세션을 확인해주세요.");
+  }
+
+  console.log("🔐 유연한 배틀 생성 사용자 확인:", {
+    uid: currentUser.uid,
+    displayName: currentUser.displayName,
+  });
 
   return await runTransaction(db, async (transaction) => {
     const contenderRefA = doc(db, "contenders", contenderA.id);
@@ -185,7 +216,8 @@ export const createBattleFromContendersFlexible = async (
 
     const battleData = {
       creatorId: currentUser.uid,
-      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      creatorName:
+        currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
       title: `${contenderA.title} vs ${contenderB.title}`,
       category: battleCategory,
 
@@ -239,19 +271,27 @@ export const createBattleFromContendersFlexible = async (
       battleCount: (contenderDocB.data().battleCount || 0) + 1,
     });
 
+    console.log("✅ 유연한 배틀 생성 성공:", battleRef.id);
     return battleRef.id;
   });
 };
 
 /**
- * 강제 배틀 생성 (모든 제한 해제)
+ * 강제 배틀 생성 (모든 제한 해제) - 세션 기반 인증
  */
 export const createBattleFromContendersForce = async (
   contenderA,
   contenderB
 ) => {
-  const currentUser = auth.currentUser;
-  if (!currentUser) throw new Error("로그인이 필요합니다.");
+  const currentUser = getCurrentUser(); // 세션에서 사용자 정보 가져오기
+  if (!currentUser) {
+    throw new Error("로그인이 필요합니다. 세션을 확인해주세요.");
+  }
+
+  console.log("🔐 강제 배틀 생성 사용자 확인:", {
+    uid: currentUser.uid,
+    displayName: currentUser.displayName,
+  });
 
   return await runTransaction(db, async (transaction) => {
     const contenderRefA = doc(db, "contenders", contenderA.id);
@@ -274,7 +314,8 @@ export const createBattleFromContendersForce = async (
 
     const battleData = {
       creatorId: currentUser.uid,
-      creatorName: currentUser.displayName || currentUser.email.split("@")[0],
+      creatorName:
+        currentUser.displayName || currentUser.email?.split("@")[0] || "익명",
       title: `${contenderA.title} vs ${contenderB.title}`,
       category: contenderA.category || contenderB.category || "general",
 
@@ -326,6 +367,7 @@ export const createBattleFromContendersForce = async (
       battleCount: (contenderDocB.data().battleCount || 0) + 1,
     });
 
+    console.log("✅ 강제 배틀 생성 성공:", battleRef.id);
     return battleRef.id;
   });
 };
@@ -369,6 +411,7 @@ function createBattleItem(contender) {
     ...(contender.platform === "tiktok" && {
       tiktokUrl: contender.tiktokUrl,
       tiktokId: contender.tiktokId,
+      tiktokHtml: contender.tiktokHtml, // TikTok HTML 임베드
     }),
 
     // 시간 설정
@@ -395,13 +438,20 @@ function createBattleItemFlexible(contender) {
     timeSettings: contender.timeSettings || null,
     description: contender.description || "",
     originalCategory: contender.category,
+
+    // TikTok 특별 처리
+    ...(contender.platform === "tiktok" && {
+      tiktokHtml: contender.tiktokHtml,
+      tiktokBlockquote: contender.tiktokBlockquote,
+      embedType: contender.embedType,
+    }),
   };
 }
 
 // ==================== 스마트 매칭 시스템 ====================
 
 /**
- * 스마트 자동 매칭 실행
+ * 스마트 자동 매칭 실행 - 세션 기반 인증
  */
 export const findAndCreateRandomBattle = async (options = {}) => {
   const {
@@ -409,6 +459,14 @@ export const findAndCreateRandomBattle = async (options = {}) => {
     allowSameCreator = false,
     allowCrossCategory = false,
   } = options;
+
+  // 사용자 인증 확인 (로깅 추가)
+  const currentUser = getCurrentUser();
+  console.log("🔐 매칭 시스템 사용자 확인:", {
+    hasUser: !!currentUser,
+    uid: currentUser?.uid,
+    displayName: currentUser?.displayName,
+  });
 
   try {
     console.log("🔍 매칭 시작 - maxMatches:", maxMatches);
@@ -662,6 +720,13 @@ async function tryCrossCategoryMatching(
  */
 export const executeForceMatching = async (maxMatches = 5) => {
   try {
+    console.log("🚀 강제 매칭 시작");
+    const currentUser = getCurrentUser();
+    console.log("🔐 강제 매칭 사용자 확인:", {
+      hasUser: !!currentUser,
+      uid: currentUser?.uid,
+    });
+
     const result = await findAndCreateRandomBattle({
       maxMatches,
       allowSameCreator: true,
@@ -686,6 +751,11 @@ export const executeForceMatching = async (maxMatches = 5) => {
  */
 export const createBattleNow = async () => {
   console.log("🚀 즉시 매칭 실행 (모든 제한 해제)");
+  const currentUser = getCurrentUser();
+  console.log("🔐 즉시 매칭 사용자 확인:", {
+    hasUser: !!currentUser,
+    uid: currentUser?.uid,
+  });
 
   const result = await findAndCreateRandomBattle({
     maxMatches: 1,
@@ -702,6 +772,20 @@ export const createBattleNow = async () => {
 export const forceCreateBattleAnyCategory = async (maxMatches = 1) => {
   try {
     console.log("🚀 강제 매칭 시작 (카테고리 무시)");
+    const currentUser = getCurrentUser();
+    if (!currentUser) {
+      return {
+        success: false,
+        reason: "auth_required",
+        message: "로그인이 필요합니다. 세션을 확인해주세요.",
+        matchesCreated: 0,
+      };
+    }
+
+    console.log("🔐 강제 매칭 사용자 확인:", {
+      uid: currentUser.uid,
+      displayName: currentUser.displayName,
+    });
 
     const contendersQuery = query(
       collection(db, "contenders"),
