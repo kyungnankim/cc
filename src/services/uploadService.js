@@ -402,31 +402,11 @@ export const secondsToTimeFormat = (seconds) => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-/**
- * 다중 콘텐츠 업로드 - 사용자 정보를 명시적으로 전달받아 하위 서비스로 넘겨주는 버전
- */
-export const uploadMultipleContents = async (postsData, category, userInfo) => {
-  try {
-    // userInfo가 제대로 전달되었는지 확인하는 로그
-    console.log(
-      "🚀 uploadService 진입. 요청자:",
-      userInfo?.email || "사용자 정보 없음"
-    );
-
-    if (!userInfo) {
-      throw new Error("사용자 정보가 누락되었습니다.");
-    }
-
-    // contentService.js의 uploadMultipleContenders 함수를 동적으로 import하여 호출
-    const { uploadMultipleContenders } = await import("./contentService");
-
-    // uploadMultipleContenders 호출 시 userInfo를 그대로 전달
-    return await uploadMultipleContenders(postsData, category, userInfo);
-  } catch (error) {
-    console.error("❌ uploadService에서 오류 발생:", error);
-    // 발생한 오류를 그대로 상위로 다시 던져서 UI에서 처리할 수 있도록 함
-    throw error;
-  }
+// 다중 콘텐츠 업로드
+export const uploadMultipleContents = async (postsData, category) => {
+  // contentService.js의 uploadMultipleContenders 함수 호출
+  const { uploadMultipleContenders } = await import("./contentService");
+  return await uploadMultipleContenders(postsData, category);
 };
 
 // 디버깅용 URL 테스트

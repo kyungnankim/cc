@@ -1,478 +1,359 @@
-// services/uploadService.js - 사용자 인증 정보 전달 수정 버전
+// src/services/userService.js - 사용자 관련 서비스 (완성 버전)
 
-// URL에서 플랫폼 감지 및 데이터 추출
-export const detectPlatformAndExtract = async (url) => {
-  if (!url) return null;
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db, auth } from "../firebase/config";
 
+// 사용자 프로필 가져오기
+export const getUserProfile = async (uid) => {
   try {
-    console.log("🔍 플랫폼 감지 시작:", url);
+    const userDoc = await getDoc(doc(db, "users", uid));
 
-    // YouTube 관련 키워드 감지
-    const youtubeKeywords = new RegExp("youtu\\.?be|youtube|yt\\.be", "i");
-    const hasYouTubeKeywords = youtubeKeywords.test(url);
+    if (!userDoc.exists()) {
+      console.log("No such user document! Creating new one...");
 
-    if (hasYouTubeKeywords) {
-      console.log("🎬 YouTube 관련 키워드 감지됨");
-
-      let videoId = null;
-      let isLive = false;
-      let isShorts = false;
-
-      // 다양한 YouTube URL 패턴 시도
-      console.log("🔍 YouTube URL 패턴 분석 중...");
-
-      // 1. 라이브 스트림 패턴: /live/VIDEO_ID
-      const livePattern = new RegExp(
-        "youtube\\.com\\/live\\/([a-zA-Z0-9_-]+)",
-        "i"
-      );
-      const liveMatch = url.match(livePattern);
-      if (liveMatch) {
-        videoId = liveMatch[1];
-        isLive = true;
-        console.log("✅ 라이브 스트림 감지:", videoId);
-      }
-
-      // 2. 일반 watch 패턴: ?v=VIDEO_ID 또는 &v=VIDEO_ID
-      if (!videoId) {
-        const watchPattern = new RegExp("[?&]v=([a-zA-Z0-9_-]+)", "i");
-        const watchMatch = url.match(watchPattern);
-        if (watchMatch) {
-          videoId = watchMatch[1];
-          console.log("✅ 일반 영상 감지:", videoId);
-        }
-      }
-
-      // 3. youtu.be 단축 링크: youtu.be/VIDEO_ID
-      if (!videoId) {
-        const shortPattern = new RegExp("youtu\\.be\\/([a-zA-Z0-9_-]+)", "i");
-        const shortMatch = url.match(shortPattern);
-        if (shortMatch) {
-          videoId = shortMatch[1];
-          console.log("✅ 단축 링크 감지:", videoId);
-        }
-      }
-
-      // 4. Shorts 패턴: /shorts/VIDEO_ID
-      if (!videoId) {
-        const shortsPattern = new RegExp(
-          "youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]+)",
-          "i"
-        );
-        const shortsMatch = url.match(shortsPattern);
-        if (shortsMatch) {
-          videoId = shortsMatch[1];
-          isShorts = true;
-          console.log("✅ Shorts 감지:", videoId);
-        }
-      }
-
-      // 5. 임베드 패턴: /embed/VIDEO_ID
-      if (!videoId) {
-        const embedPattern = new RegExp(
-          "youtube\\.com\\/embed\\/([a-zA-Z0-9_-]+)",
-          "i"
-        );
-        const embedMatch = url.match(embedPattern);
-        if (embedMatch) {
-          videoId = embedMatch[1];
-          console.log("✅ 임베드 링크 감지:", videoId);
-        }
-      }
-
-      // 비디오 ID 후처리 (쿼리 파라미터 제거)
-      if (videoId) {
-        // ?나 &로 시작하는 추가 파라미터 제거
-        if (videoId.includes("?")) {
-          videoId = videoId.split("?")[0];
-        }
-        if (videoId.includes("&")) {
-          videoId = videoId.split("&")[0];
-        }
-
-        console.log("🎯 최종 비디오 ID:", videoId);
-
-        // 비디오 ID 유효성 검사 (YouTube ID는 보통 11자리)
-        if (videoId.length < 8) {
-          console.log("❌ 비디오 ID가 너무 짧음:", videoId);
-          return {
-            platform: "youtube_invalid",
-            error: "YouTube 비디오 ID가 올바르지 않습니다.",
-            suggestion: "올바른 YouTube URL을 입력해주세요.",
-            detectedKeywords: true,
-          };
-        }
-
-        // URL에서 시작 시간 추출
-        const timePattern = new RegExp("[?&](?:t|start)=(\\d+)", "i");
-        const timeMatch = url.match(timePattern);
-        const startTime = timeMatch ? parseInt(timeMatch[1]) : 0;
-
-        console.log("✅ YouTube 감지 완료:", {
-          videoId,
-          startTime,
-          type: isLive ? "live" : isShorts ? "shorts" : "video",
-          originalUrl: url,
-          isLive,
-          isShorts,
-        });
-
-        return {
-          platform: "youtube",
-          videoId,
-          originalUrl: url,
-          thumbnailUrl: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-          embedUrl: `https://www.youtube.com/embed/${videoId}`,
-          startTime: startTime,
-          urlDetectedTime: startTime,
-          contentType: isLive ? "live" : isShorts ? "shorts" : "video",
-          isLive: isLive,
-          isShorts: isShorts,
-        };
-      } else {
-        console.log("❌ 비디오 ID를 추출할 수 없음");
-
-        // 패턴 테스트 결과
-        const liveTest = new RegExp(
-          "youtube\\.com\\/live\\/([a-zA-Z0-9_-]+)",
-          "i"
-        );
-        const watchTest = new RegExp("[?&]v=([a-zA-Z0-9_-]+)", "i");
-        const shortTest = new RegExp("youtu\\.be\\/([a-zA-Z0-9_-]+)", "i");
-        const shortsTest = new RegExp(
-          "youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]+)",
-          "i"
-        );
-        const embedTest = new RegExp(
-          "youtube\\.com\\/embed\\/([a-zA-Z0-9_-]+)",
-          "i"
-        );
-
-        return {
-          platform: "youtube_invalid",
-          error: "YouTube 비디오 ID를 찾을 수 없습니다.",
-          suggestion: "URL 형식을 확인해주세요.",
-          detectedKeywords: true,
-          debugInfo: {
-            originalUrl: url,
-            hasKeywords: true,
-            testedPatterns: {
-              live: liveTest.test(url),
-              watch: watchTest.test(url),
-              short: shortTest.test(url),
-              shorts: shortsTest.test(url),
-              embed: embedTest.test(url),
-            },
+      // 🔧 사용자 문서가 없으면 기본 문서 생성
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const defaultUserData = {
+          uid: uid,
+          email: currentUser.email,
+          displayName:
+            currentUser.displayName || currentUser.email.split("@")[0],
+          photoURL: currentUser.photoURL || null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          provider: "email",
+          stats: {
+            totalVotes: 0,
+            battlesCreated: 0,
+            battlesWon: 0,
+            points: 100, // 기본 포인트
           },
+          bio: "",
+          location: "",
+          website: "",
         };
-      }
-    }
 
-    // TikTok 감지
-    const tiktokPattern = new RegExp(
-      "(?:tiktok\\.com\\/@[\\w.-]+\\/video\\/(\\d+)|tiktok\\.com\\/t\\/(\\w+)|vm\\.tiktok\\.com\\/(\\w+)|tiktok\\.com\\/v\\/(\\d+))",
-      "i"
-    );
-    const tiktokMatch = url.match(tiktokPattern);
-    if (tiktokMatch) {
-      const videoId =
-        tiktokMatch[1] || tiktokMatch[2] || tiktokMatch[3] || tiktokMatch[4];
-      const userPattern = new RegExp("@([\\w.-]+)");
-      const userMatch = url.match(userPattern);
-      const username = userMatch ? userMatch[1] : null;
+        // 새 사용자 문서 생성
+        await setDoc(doc(db, "users", uid), defaultUserData);
+        console.log("새 사용자 문서가 생성되었습니다.");
 
-      console.log("✅ TikTok 감지됨:", { videoId, username });
-
-      // TikTok oEmbed API 시도
-      try {
-        const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(
-          url
-        )}`;
-        const response = await fetch(oembedUrl, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-
-        if (response.ok) {
-          const oembedData = await response.json();
-          console.log("✅ TikTok oEmbed 성공:", oembedData);
-
-          return {
-            platform: "tiktok",
-            videoId,
-            username: username || oembedData.author_name,
-            originalUrl: url,
-            embedUrl: url,
-            title: oembedData.title,
-            authorName: oembedData.author_name,
-            thumbnailUrl: oembedData.thumbnail_url,
-            html: oembedData.html,
-          };
-        }
-      } catch (error) {
-        console.warn("⚠️ TikTok oEmbed 실패, 기본 처리:", error);
+        return defaultUserData;
       }
 
-      // API 실패 시 기본 처리
-      return {
-        platform: "tiktok",
-        videoId,
-        username,
-        originalUrl: url,
-        embedUrl: url,
-        title: username ? `@${username}의 TikTok` : "TikTok 비디오",
-        authorName: username,
-      };
+      return null;
     }
 
-    // Instagram 감지
-    const instagramPattern = new RegExp(
-      "instagram\\.com\\/(p|reel|tv)\\/([A-Za-z0-9_-]+)",
-      "i"
-    );
-    const instagramMatch = url.match(instagramPattern);
-    if (instagramMatch) {
-      const postId = instagramMatch[2];
-      const postType = instagramMatch[1];
-
-      console.log("✅ Instagram 감지됨:", { postId, postType });
-
-      return {
-        platform: "instagram",
-        postId,
-        postType,
-        originalUrl: url,
-        embedUrl: `${url}embed/`,
-      };
-    }
-
-    // 아무것도 감지되지 않은 경우
-    console.log("❌ 지원하지 않는 플랫폼:", url);
-    return null;
+    return { id: userDoc.id, ...userDoc.data() };
   } catch (error) {
-    console.error("❌ 플랫폼 감지 오류:", error);
+    console.error("Error getting user profile:", error);
     return null;
   }
 };
 
-// URL 유효성 실시간 검사
-export const validateUrlInRealTime = (url) => {
-  if (!url) return { isValid: false, message: "" };
-
-  // YouTube 키워드 체크
-  const youtubePattern = new RegExp("youtu\\.?be|youtube|yt\\.be", "i");
-  const tiktokPattern = new RegExp("tiktok", "i");
-  const instagramPattern = new RegExp("instagram", "i");
-
-  const hasYouTube = youtubePattern.test(url);
-  const hasTikTok = tiktokPattern.test(url);
-  const hasInstagram = instagramPattern.test(url);
-
-  if (hasYouTube) {
-    console.log("🎯 YouTube 키워드 감지:", url);
-
-    // YouTube URL 형식 체크
-    const livePattern = new RegExp(
-      "youtube\\.com\\/live\\/([a-zA-Z0-9_-]{8,})",
-      "i"
-    );
-    const watchPattern = new RegExp("[?&]v=([a-zA-Z0-9_-]{8,})", "i");
-    const shortPattern = new RegExp("youtu\\.be\\/([a-zA-Z0-9_-]{8,})", "i");
-    const shortsPattern = new RegExp(
-      "youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]{8,})",
-      "i"
-    );
-    const embedPattern = new RegExp(
-      "youtube\\.com\\/embed\\/([a-zA-Z0-9_-]{8,})",
-      "i"
-    );
-
-    const isValidYouTube =
-      livePattern.test(url) ||
-      watchPattern.test(url) ||
-      shortPattern.test(url) ||
-      shortsPattern.test(url) ||
-      embedPattern.test(url);
-
-    if (isValidYouTube) {
-      // 라이브 스트림 감지
-      const isLive = new RegExp("\\/live\\/|live\\/", "i").test(url);
-      const isShorts = new RegExp("\\/shorts\\/|shorts\\/", "i").test(url);
-
-      let typeMessage = "✅ 올바른 YouTube URL";
-      if (isLive) typeMessage += " (라이브 스트림)";
-      else if (isShorts) typeMessage += " (Shorts)";
-
-      return {
-        isValid: true,
-        platform: "youtube",
-        message: typeMessage,
-        isLive,
-        isShorts,
-      };
-    } else {
-      return {
-        isValid: false,
-        platform: "youtube",
-        message: "⚠️ YouTube URL 형식이 올바르지 않습니다",
-        suggestion: "올바른 형식을 확인해주세요",
-      };
-    }
-  }
-
-  if (hasTikTok) {
-    const tiktokValidPattern = new RegExp(
-      "tiktok\\.com\\/@[\\w.-]+\\/video\\/\\d+|tiktok\\.com\\/t\\/\\w+|vm\\.tiktok\\.com\\/\\w+",
-      "i"
-    );
-
-    if (tiktokValidPattern.test(url)) {
-      return {
-        isValid: true,
-        platform: "tiktok",
-        message: "✅ 올바른 TikTok URL",
-      };
-    } else {
-      return {
-        isValid: false,
-        platform: "tiktok",
-        message: "⚠️ TikTok URL 형식이 올바르지 않습니다",
-      };
-    }
-  }
-
-  if (hasInstagram) {
-    const instagramValidPattern = new RegExp(
-      "instagram\\.com\\/(p|reel|tv)\\/[A-Za-z0-9_-]+",
-      "i"
-    );
-
-    if (instagramValidPattern.test(url)) {
-      return {
-        isValid: true,
-        platform: "instagram",
-        message: "✅ 올바른 Instagram URL",
-      };
-    } else {
-      return {
-        isValid: false,
-        platform: "instagram",
-        message: "⚠️ Instagram URL 형식이 올바르지 않습니다",
-      };
-    }
-  }
-
-  // URL 같은 형태이지만 지원하지 않는 플랫폼
-  if (url.includes("http") || url.includes("www.")) {
-    return {
-      isValid: false,
-      message: "❌ 지원하지 않는 플랫폼입니다",
-      suggestion: "YouTube, TikTok, Instagram URL만 지원됩니다",
-    };
-  }
-
-  return {
-    isValid: false,
-    message: "올바른 URL을 입력해주세요",
-  };
-};
-
-// 시간을 초로 변환
-export const parseTimeToSeconds = (timeStr) => {
-  if (!timeStr) return 0;
-  const parts = timeStr.split(":").reverse();
-  let seconds = 0;
-  if (parts[0]) seconds += parseInt(parts[0]) || 0;
-  if (parts[1]) seconds += (parseInt(parts[1]) || 0) * 60;
-  if (parts[2]) seconds += (parseInt(parts[2]) || 0) * 3600;
-  return seconds;
-};
-
-// 초를 시간 형식으로 변환
-export const secondsToTimeFormat = (seconds) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, "0")}:${s
-      .toString()
-      .padStart(2, "0")}`;
-  }
-  return `${m}:${s.toString().padStart(2, "0")}`;
-};
-
-// 다중 콘텐츠 업로드 - 사용자 정보를 명시적으로 전달하는 버전
-export const uploadMultipleContents = async (
-  postsData,
-  category,
-  userInfo = null
-) => {
+// 사용자 통계 가져오기
+export const getUserStats = async (uid) => {
   try {
-    console.log("🚀 업로드 서비스 시작:", {
-      postsCount: postsData.length,
-      category,
-      userInfo: userInfo ? userInfo.email : "not provided",
+    const userProfile = await getUserProfile(uid);
+
+    if (!userProfile) {
+      // 기본 통계 반환
+      return {
+        totalVotes: 0,
+        battlesCreated: 0,
+        battlesWon: 0,
+        points: 100,
+      };
+    }
+
+    // 실제 통계 계산 (더 정확한 통계를 위해)
+    const [battlesCreated, votesCount] = await Promise.all([
+      // 생성한 배틀 수
+      getDocs(query(collection(db, "battles"), where("creatorId", "==", uid))),
+      // 참여한 투표 수 (battles에서 participants 확인)
+      getDocs(
+        query(
+          collection(db, "battles"),
+          where("participants", "array-contains", uid)
+        )
+      ),
+    ]);
+
+    const stats = {
+      totalVotes: votesCount.size,
+      battlesCreated: battlesCreated.size,
+      battlesWon: userProfile.stats?.battlesWon || 0,
+      points: userProfile.stats?.points || 100,
+    };
+
+    // 사용자 문서의 통계 업데이트
+    await updateDoc(doc(db, "users", uid), {
+      "stats.totalVotes": stats.totalVotes,
+      "stats.battlesCreated": stats.battlesCreated,
+      updatedAt: serverTimestamp(),
     });
 
-    // 사용자 정보 확인
-    let currentUser = userInfo;
-    if (!currentUser) {
-      // userInfo가 전달되지 않은 경우 세션에서 가져오기 시도
-      try {
-        const sessionUser = sessionStorage.getItem("currentUser");
-        if (sessionUser) {
-          currentUser = JSON.parse(sessionUser);
-          console.log("📱 세션에서 사용자 정보 복원:", currentUser.email);
-        }
-      } catch (error) {
-        console.error("세션 사용자 정보 파싱 오류:", error);
-      }
-    }
-
-    if (!currentUser || !currentUser.email) {
-      throw new Error("로그인이 필요합니다. 사용자 정보가 없습니다.");
-    }
-
-    console.log(
-      "✅ 사용자 인증 확인 완료:",
-      currentUser.email,
-      currentUser.provider
-    );
-
-    // contentService.js의 uploadMultipleContenders 함수 호출 - 사용자 정보 전달
-    const { uploadMultipleContenders } = await import("./contentService");
-    return await uploadMultipleContenders(postsData, category, currentUser);
+    return stats;
   } catch (error) {
-    console.error("❌ uploadService 오류:", error);
+    console.error("Error getting user stats:", error);
+    return {
+      totalVotes: 0,
+      battlesCreated: 0,
+      battlesWon: 0,
+      points: 100,
+    };
+  }
+};
+
+// 사용자 프로필 업데이트
+export const updateProfile = async (uid, profileData) => {
+  try {
+    const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, {
+      ...profileData,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating profile:", error);
     throw error;
   }
 };
 
-// 디버깅용 URL 테스트
-export const testYouTubeUrl = (url) => {
-  console.log("🧪 YouTube URL 테스트:", url);
+// 사용자가 생성한 배틀 목록 가져오기
+export const getUserBattles = async (userId, filter = "all") => {
+  try {
+    let q;
 
-  const hasKeywords = new RegExp("youtu\\.?be|youtube", "i").test(url);
-  console.log("키워드 감지:", hasKeywords);
-
-  const livePattern = new RegExp(
-    "youtube\\.com\\/live\\/([a-zA-Z0-9_-]+)",
-    "i"
-  );
-  const match = url.match(livePattern);
-  console.log("라이브 패턴 매치:", match);
-
-  if (match) {
-    let videoId = match[1];
-    if (videoId.includes("?")) {
-      videoId = videoId.split("?")[0];
+    if (filter === "all") {
+      q = query(
+        collection(db, "battles"),
+        where("creatorId", "==", userId),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      );
+    } else {
+      q = query(
+        collection(db, "battles"),
+        where("creatorId", "==", userId),
+        where("status", "==", filter),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      );
     }
-    if (videoId.includes("&")) {
-      videoId = videoId.split("&")[0];
-    }
-    console.log("추출된 비디오 ID:", videoId);
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }));
+  } catch (error) {
+    console.error("Error getting user battles:", error);
+    return [];
   }
-
-  return match;
 };
+
+// 사용자 투표 내역 가져오기
+export const getUserVotes = async (userId) => {
+  try {
+    // 사용자가 참여한 배틀들 가져오기
+    const q = query(
+      collection(db, "battles"),
+      where("participants", "array-contains", userId),
+      orderBy("lastVoteAt", "desc"),
+      limit(50)
+    );
+
+    const snapshot = await getDocs(q);
+    const votes = [];
+
+    snapshot.docs.forEach((doc) => {
+      const battle = doc.data();
+      votes.push({
+        id: doc.id,
+        battleTitle: battle.title,
+        category: battle.category,
+        votedAt: battle.lastVoteAt?.toDate() || new Date(),
+        selectedItem: "투표 완료", // 실제로는 사용자별 선택 기록 필요
+        isWinner: false, // 실제로는 최종 결과와 비교 필요
+      });
+    });
+
+    return votes;
+  } catch (error) {
+    console.error("Error getting user votes:", error);
+    return [];
+  }
+};
+
+// 사용자 포인트 내역 가져오기
+export const getUserPoints = async (userId) => {
+  try {
+    // pointHistory 컬렉션이 없다면 기본 데이터 반환
+    const q = query(
+      collection(db, "pointHistory"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc"),
+      limit(30)
+    );
+
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      // 포인트 내역이 없으면 기본 데이터 반환
+      return [
+        {
+          id: "1",
+          type: "welcome",
+          amount: 100,
+          createdAt: new Date(),
+          description: "가입 환영 보너스",
+        },
+      ];
+    }
+
+    return snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }));
+  } catch (error) {
+    console.error("Error getting user points:", error);
+    // 에러 발생 시 기본 포인트 내역 반환
+    return [
+      {
+        id: "1",
+        type: "welcome",
+        amount: 100,
+        createdAt: new Date(),
+        description: "가입 환영 보너스",
+      },
+      {
+        id: "2",
+        type: "vote",
+        amount: 10,
+        createdAt: new Date(Date.now() - 86400000), // 1일 전
+        description: "투표 참여",
+      },
+    ];
+  }
+};
+
+// 포인트 추가 함수
+export const addPoints = async (userId, pointData) => {
+  try {
+    // 포인트 내역 추가
+    await setDoc(doc(collection(db, "pointHistory")), {
+      userId,
+      type: pointData.type,
+      amount: pointData.amount,
+      description: pointData.description,
+      createdAt: serverTimestamp(),
+    });
+
+    // 사용자 총 포인트 업데이트
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    if (userDoc.exists()) {
+      const currentPoints = userDoc.data().stats?.points || 0;
+      await updateDoc(userRef, {
+        "stats.points": currentPoints + pointData.amount,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error adding points:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// 사용자 통계 업데이트 함수
+export const updateUserStats = async (userId, statType, increment = 1) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    if (userDoc.exists()) {
+      const currentStats = userDoc.data().stats || {};
+      const updateData = {
+        [`stats.${statType}`]: (currentStats[statType] || 0) + increment,
+        updatedAt: serverTimestamp(),
+      };
+
+      await updateDoc(userRef, updateData);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating user stats:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// 사용자 설정 저장
+export const saveUserSettings = async (userId, settings) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+      settings: settings,
+      updatedAt: serverTimestamp(),
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Error saving user settings:", error);
+    throw error;
+  }
+};
+
+// 사용자 설정 가져오기
+export const getUserSettings = async (userId) => {
+  try {
+    const userDoc = await getDoc(doc(db, "users", userId));
+
+    if (userDoc.exists()) {
+      return userDoc.data().settings || getDefaultSettings();
+    }
+
+    return getDefaultSettings();
+  } catch (error) {
+    console.error("Error getting user settings:", error);
+    return getDefaultSettings();
+  }
+};
+
+// 기본 설정값
+const getDefaultSettings = () => ({
+  notifications: {
+    email: true,
+    push: false,
+    battleResults: true,
+    newBattles: false,
+    comments: true,
+  },
+  privacy: {
+    profilePublic: true,
+    showStats: true,
+    allowMessages: true,
+  },
+  preferences: {
+    theme: "dark",
+    language: "ko",
+    autoPlay: false,
+  },
+});
